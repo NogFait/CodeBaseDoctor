@@ -1,0 +1,16 @@
+# graphify — regenerable knowledge-graph cache (graphify update .)
+graphify-out/
+
+# agent teams lite — skill registry cache
+.atl/
+
+# node
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.local
+
+# editors / OS
+.DS_Store
