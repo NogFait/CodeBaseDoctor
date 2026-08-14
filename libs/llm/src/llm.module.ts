@@ -1,7 +1,15 @@
 import { Module } from "@nestjs/common";
+import { LLM_JUDGE_PORT } from "@cbd/analysis";
+import { AnthropicJudgeAdapter } from "./anthropic-judge-adapter";
 
-// Placeholder for Phase 1. Real provider lands in Phase 3:
-//   { provide: LLM_JUDGE_PORT, useClass: AnthropicJudgeAdapter }
 // See design: "NestJS Wiring" - libs/llm.
-@Module({})
+// useFactory (not useClass): AnthropicJudgeAdapter's constructor takes a
+// plain options interface (client?, modelId?), not Nest-resolvable tokens —
+// same reflection-metadata pitfall documented for RepoSourceModule and
+// AnalyzersModule (an interface/plain-object constructor param is erased at
+// runtime, so Nest's reflection-based injection can't resolve it).
+@Module({
+  providers: [{ provide: LLM_JUDGE_PORT, useFactory: () => new AnthropicJudgeAdapter() }],
+  exports: [LLM_JUDGE_PORT],
+})
 export class LlmModule {}

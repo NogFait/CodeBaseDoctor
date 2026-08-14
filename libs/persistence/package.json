@@ -16,6 +16,8 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "prisma": "^6.19.3"
+    "@testcontainers/postgresql": "^12.1.0",
+    "prisma": "^6.19.3",
+    "testcontainers": "^12.1.0"
   }
 }
