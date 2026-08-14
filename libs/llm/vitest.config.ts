@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     name: "@cbd/llm",
     environment: "node",
-    include: ["src/**/*.{spec,test}.ts"],
+    include: ["src/**/*.{spec,test}.ts", "testing/**/*.{spec,test}.ts"],
   },
 });

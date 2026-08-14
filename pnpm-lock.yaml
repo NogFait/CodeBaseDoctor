@@ -139,6 +139,9 @@ importers:
 
   libs/persistence:
     dependencies:
+      '@cbd/analysis':
+        specifier: workspace:*
+        version: link:../analysis
       '@nestjs/common':
         specifier: ^11.2.0
         version: 11.2.0(reflect-metadata@0.2.2)(rxjs@7.8.2)
