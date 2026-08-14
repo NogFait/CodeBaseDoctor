@@ -1,0 +1,7 @@
+{
+  "name": "cbd-scanner-indexer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Placeholder Node indexer baked into the cbd-scanner image. Real file-count/LOC/language-mix logic (LanguageDetector) lands in Phase 3 - see design 'Deferred Risks - Multi-language aggregation'.",
+  "main": "index.js"
+}

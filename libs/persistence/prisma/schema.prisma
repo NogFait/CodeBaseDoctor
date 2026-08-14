@@ -1,0 +1,128 @@
+// Prisma schema for CodeBase Doctor MVP.
+// DDL mirrors design "Data Schema (Postgres)" exactly. The partial unique
+// index (repo_scan_cache_uniq, WHERE status = 'complete') cannot be expressed
+// in Prisma's schema DSL, so it is hand-written as raw SQL in
+// prisma/migrations/20260814000000_init/migration.sql instead of relying on
+// `prisma migrate dev` to generate it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -- immutable scan results --------------------------------------------------
+// NOTE: `status` is plain TEXT + CHECK in the design (not a Postgres ENUM,
+// unlike job_status/category_status below) - Prisma's schema DSL cannot
+// express CHECK constraints on a non-enum column here, so the constraint is
+// hand-written in migration.sql alongside the partial unique index.
+
+model RepoScan {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  repoUrl          String   @map("repo_url")
+  commitSha        String   @map("commit_sha") @db.Char(40)
+  engineVersion    String   @map("engine_version")
+  status           String // 'complete' | 'partial' - see migration.sql CHECK constraint
+  compositeScore   Decimal? @map("composite_score") @db.Decimal(5, 2)
+  completeness     Decimal  @db.Decimal(3, 2)
+  dominantLanguage String?  @map("dominant_language")
+  languageMix      Json     @default("[]") @map("language_mix")
+  categories       Json // CategoryScore[6], always length 6
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  jobs AnalysisJob[]
+
+  // THE cache index: one complete scan per (repo, sha, engine). Partials are
+  // excluded from uniqueness (via the partial index in migration.sql) so a
+  // later complete scan of the same SHA can still be inserted; the @@unique
+  // below is intentionally NOT declared here because Prisma would emit a
+  // plain (non-partial) unique index. See migration.sql for the real index.
+  @@index([repoUrl, commitSha, engineVersion, createdAt(sort: Desc)], name: "repo_scan_cache_lookup")
+  @@index([repoUrl, createdAt(sort: Desc)], name: "repo_scan_history")
+  @@map("repo_scan")
+}
+
+// -- job lifecycle ------------------------------------------------------------
+
+enum JobStatus {
+  queued
+  resolving
+  cloning
+  analyzing
+  aggregating
+  completed
+  completed_partial
+  failed
+
+  @@map("job_status")
+}
+
+model AnalysisJob {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  repoUrl       String    @map("repo_url")
+  commitSha     String?   @map("commit_sha") @db.Char(40)
+  engineVersion String    @map("engine_version")
+  actorId       String    @map("actor_id")
+  reservationId String    @unique @map("reservation_id") @db.Uuid
+  status        JobStatus @default(queued)
+  errorCode     String?   @map("error_code")
+  errorMessage  String?   @map("error_message")
+  repoScanId    String?   @map("repo_scan_id") @db.Uuid
+  bullJobId     String?   @map("bull_job_id")
+  attempts      Int       @default(0)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt     DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  repoScan   RepoScan?             @relation(fields: [repoScanId], references: [id])
+  categories AnalysisJobCategory[]
+
+  @@index([actorId, createdAt(sort: Desc)], name: "analysis_job_actor")
+  @@map("analysis_job")
+}
+
+// -- per-category progress: one row per analyzer -> concurrent UPDATEs never conflict
+
+enum CategoryStatus {
+  pending
+  running
+  scored
+  failed
+  skipped
+
+  @@map("category_status")
+}
+
+model AnalysisJobCategory {
+  jobId      String         @map("job_id") @db.Uuid
+  category   String
+  status     CategoryStatus @default(pending)
+  score      Decimal?       @db.Decimal(5, 2)
+  confidence String?
+  rationale  String?
+  findings   Json           @default("[]")
+  errorCode  String?        @map("error_code")
+  durationMs Int?           @map("duration_ms")
+  updatedAt  DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  job AnalysisJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, category])
+  @@map("analysis_job_category")
+}
+
+// -- quota ---------------------------------------------------------------------
+
+model QuotaReservation {
+  id        String   @id @db.Uuid // reservationId supplied by caller -> idempotent
+  actorId   String   @map("actor_id")
+  usageDate DateTime @map("usage_date") @db.Date
+  tier      String   @default("free")
+  state     String // 'consumed' | 'refunded' - see migration.sql CHECK constraint
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("quota_reservation")
+}

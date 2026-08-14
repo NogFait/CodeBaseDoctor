@@ -1,0 +1,13 @@
+{
+  "name": "@cbd/llm",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@cbd/analysis": "workspace:*",
+    "@nestjs/common": "^11.2.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  }
+}
