@@ -1,9 +1,40 @@
 import { Module } from "@nestjs/common";
+import { CATEGORY_ANALYZERS, LLM_JUDGE_PORT, type CategoryAnalyzer, type LLMJudgePort } from "@cbd/analysis";
+import { SecurityAnalyzer } from "./security-analyzer";
+import { TestingAnalyzer } from "./testing-analyzer";
+import { MaintainabilityAnalyzer } from "./maintainability-analyzer";
+import { ArchitectureAnalyzer } from "./architecture-analyzer";
+import { DocumentationAnalyzer } from "./documentation-analyzer";
+import { PerformanceAnalyzer } from "./performance-analyzer";
 
-// Placeholder for Phase 1. Real wiring lands in Phase 3:
-//   { provide: CATEGORY_ANALYZERS, useFactory: (...6 analyzers) => [...],
-//     inject: [SecurityAnalyzer, TestingAnalyzer, MaintainabilityAnalyzer,
-//              ArchitectureAnalyzer, DocumentationAnalyzer, PerformanceAnalyzer] }
-// See design: "NestJS Wiring" - libs/analyzers.
-@Module({})
+// See design: "NestJS Wiring" - libs/analyzers. Design's own sketch shows
+// `useFactory: (...6) => [...], inject: [SecurityAnalyzer, ...]` — treating
+// each analyzer as its own Nest-managed provider. That doesn't work as
+// written for ArchitectureAnalyzer/DocumentationAnalyzer: their
+// constructors take `LLMJudgePort`, an INTERFACE, and Nest's
+// reflection-based constructor injection can't resolve an interface type
+// (erased at runtime — same "Object" token pitfall as RepoSourceModule,
+// see that file's comment). Registering ArchitectureAnalyzer/
+// DocumentationAnalyzer as their own `useClass` providers would hit the
+// exact same problem. Instead: ONE factory, injecting only the
+// Nest-resolvable token (LLM_JUDGE_PORT), constructing all 6 analyzers by
+// hand. Same array shape the design asks for; different plumbing to get
+// there.
+@Module({
+  providers: [
+    {
+      provide: CATEGORY_ANALYZERS,
+      useFactory: (judge: LLMJudgePort): readonly CategoryAnalyzer[] => [
+        new SecurityAnalyzer(),
+        new TestingAnalyzer(),
+        new MaintainabilityAnalyzer(),
+        new ArchitectureAnalyzer(judge),
+        new DocumentationAnalyzer(judge),
+        new PerformanceAnalyzer(),
+      ],
+      inject: [LLM_JUDGE_PORT],
+    },
+  ],
+  exports: [CATEGORY_ANALYZERS],
+})
 export class AnalyzersModule {}
