@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
-import { AnalysisBelowThresholdError } from "../domain";
+import { AnalysisBelowThresholdError, computeEngineVersion } from "../domain";
 import type { IngestionLimits, RepoScan } from "../ports";
 import {
   CATEGORY_ANALYZERS,
@@ -36,24 +35,6 @@ const DEFAULT_INGESTION_LIMITS: IngestionLimits = {
   cloneTimeoutMs: 120_000,
 };
 
-/**
- * `engineVersion = sha256(sorted "category:analyzerVersion" pairs).slice(0,8)`.
- * The design's full formula also folds in `appVersion` and every analyzer's
- * LLM `rubricVersion` (neither of which the `CategoryAnalyzer` port exposes
- * today) — deferred, matching the same "not this port's job yet" shape as
- * task 4.4. What IS captured here is the part that matters for THIS batch's
- * tests and for the port's actual contract: swapping an analyzer's
- * `analyzerVersion` changes the cache key. Bumping `appVersion`/prompts to
- * bust the cache is a Phase 5+ concern once those values exist somewhere to read from.
- */
-function computeEngineVersion(analyzers: readonly CategoryAnalyzer[]): string {
-  const fingerprint = [...analyzers]
-    .map((a) => `${a.category}:${a.analyzerVersion}`)
-    .sort()
-    .join("|");
-  return createHash("sha256").update(fingerprint).digest("hex").slice(0, 8);
-}
-
 export interface AnalyzeRepoRequest {
   repoUrl: string;
   actorId: string;
@@ -83,7 +64,15 @@ export class RepoAnalysisService {
     @Inject(USAGE_QUOTA_PORT) private readonly quota: UsageQuotaPort,
     @Inject(CATEGORY_ANALYZERS) private readonly analyzers: readonly CategoryAnalyzer[],
   ) {
-    this.engineVersion = computeEngineVersion(analyzers);
+    // Shared with apps/api's job-submission use case (Task B, batch
+    // 2026-09-04): both map their own analyzer-version source (live
+    // instances here; the static ANALYZER_VERSIONS manifest there) to the
+    // same {category, analyzerVersion} entry shape and call the SAME pure
+    // function — see domain/engine-version.ts's doc comment for why this
+    // matters (cache-key parity across the two processes).
+    this.engineVersion = computeEngineVersion(
+      analyzers.map((a) => ({ category: a.category, analyzerVersion: a.analyzerVersion })),
+    );
   }
 
   /**
