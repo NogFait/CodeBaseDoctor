@@ -88,6 +88,13 @@ importers:
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
+    devDependencies:
+      '@cbd/persistence':
+        specifier: workspace:*
+        version: link:../persistence
+      '@cbd/repo-source':
+        specifier: workspace:*
+        version: link:../repo-source
 
   libs/analyzers:
     dependencies:
