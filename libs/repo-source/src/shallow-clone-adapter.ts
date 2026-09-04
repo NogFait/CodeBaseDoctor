@@ -30,6 +30,17 @@ import { demuxDockerLog } from "./docker-log";
 
 /** The volume's mount point inside every container. */
 const MOUNT_DIR = "/work";
+
+/** Must stay byte-identical to `SCAN_FINDINGS_PATH` in
+ * libs/analyzers/src/scan-output.ts. Duplicated (not imported) deliberately
+ * — `repo-source` and `analyzers` are both adapter-layer packages that must
+ * not depend on each other, only on the shared `@cbd/analysis` domain
+ * package; importing the constant across that boundary would create the
+ * exact adapter-to-adapter coupling the hexagonal layering forbids (see the
+ * `rg` hexagonal-boundary sweeps run after every batch in apply-progress).
+ * See buildRepoContext()'s readFile() below for why this path is
+ * special-cased instead of resolved like every other file. */
+const SCAN_FINDINGS_PATH = ".cbd/scan-findings.json";
 /** Where the clone actually lands — a SUBDIRECTORY of the mount, not the
  * mount root. See class doc, deviation 4: on this Docker install, a fresh
  * named volume's mount-root directory silently resets its own ownership
@@ -61,6 +72,19 @@ interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+}
+
+/** Structurally mirrors `RawScanFinding` from
+ * libs/analyzers/src/scan-output.ts (see SCAN_FINDINGS_PATH comment above
+ * for why this is a local duplicate, not an import). This is exactly the
+ * shape indexer/index.js's `findings` array emits on stdout. */
+interface IndexedFinding {
+  ruleId: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  path?: string;
+  line?: number;
+  message: string;
+  source: "semgrep" | "osv-scanner";
 }
 
 export interface ShallowCloneAdapterOptions {
@@ -256,7 +280,11 @@ export class ShallowCloneAdapter implements RepoSourcePort {
   private buildRepoContext(repoUrl: string, commitSha: string, volumeName: string, indexJson: string): RepoContext {
     const parsed = JSON.parse(indexJson) as {
       files: { path: string; sizeBytes: number; loc?: number }[];
+      findings?: IndexedFinding[];
     };
+    // Serialized once here (not per-readFile-call) — the scan-findings
+    // "file" never changes across the lifetime of this RepoContext.
+    const scanFindingsJson = JSON.stringify({ findings: parsed.findings ?? [] });
 
     const files: RepoFile[] = parsed.files.map((f) => ({
       path: f.path,
@@ -283,6 +311,22 @@ export class ShallowCloneAdapter implements RepoSourcePort {
         : null;
 
     const readFile = async (filePath: string): Promise<string> => {
+      // Special-cased: Semgrep/OSV-Scanner findings arrive from the SAME
+      // stdout JSON blob as the file walk (indexer/index.js's `findings`
+      // field), not as a real file on the volume. The scanner container
+      // mounts the volume `:ro` (design's isolation requirement, see class
+      // doc) — the indexer could never write `.cbd/scan-findings.json` onto
+      // it even if it wanted to. SecurityAnalyzer's ScanOutputReader seam
+      // (libs/analyzers/src/scan-output.ts) still reads this exact
+      // well-known path through the same RepoContext.readFile() every
+      // other analyzer uses; only the underlying transport differs from a
+      // real per-file container read (runReader() below) — no real disk
+      // I/O happens for this one path, on purpose. See apply-progress task
+      // 3.2.8 for the full reasoning.
+      if (filePath === SCAN_FINDINGS_PATH) {
+        return scanFindingsJson;
+      }
+
       const meta = files.find((f) => f.path === filePath);
       if (!meta) {
         throw new Error(`ShallowCloneAdapter: unknown file "${filePath}"`);

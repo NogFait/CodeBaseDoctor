@@ -2,6 +2,6 @@
   "name": "cbd-scanner-indexer",
   "version": "0.0.0",
   "private": true,
-  "description": "Placeholder Node indexer baked into the cbd-scanner image. Real file-count/LOC/language-mix logic (LanguageDetector) lands in Phase 3 - see design 'Deferred Risks - Multi-language aggregation'.",
+  "description": "Node indexer baked into the cbd-scanner image. Real file walk/LOC (Phase 3 batch A) plus real offline Semgrep + OSV-Scanner invocation (Phase 3 task 3.2.8) - see index.js doc comment.",
   "main": "index.js"
 }

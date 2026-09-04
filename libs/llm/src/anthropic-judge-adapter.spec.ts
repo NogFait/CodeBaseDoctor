@@ -35,7 +35,7 @@ function fakeClient(createImpl: (params: unknown, options: unknown) => Promise<P
 function verdictResponse(overrides: Partial<Anthropic.Message> = {}): Partial<Anthropic.Message> {
   return {
     id: "msg_test123",
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     stop_reason: "tool_use",
     usage: { input_tokens: 120, output_tokens: 40 } as Anthropic.Usage,
     content: [
@@ -60,7 +60,7 @@ describe("AnthropicJudgeAdapter", () => {
     expect(verdict).toEqual({
       score: 72,
       rationale: "Reasonable module boundaries, some coupling in utils.",
-      modelId: "claude-sonnet-4-6",
+      modelId: "claude-sonnet-5",
       promptTokens: 120,
       completionTokens: 40,
     });

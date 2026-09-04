@@ -5,21 +5,15 @@ import type { JudgeRequest, JudgeVerdict, LLMJudgePort } from "@cbd/analysis";
  * AnthropicJudgeAdapter — the ONLY component in the system allowed to talk to
  * an LLM provider SDK. See design: "The five ports" / "LLM determinism".
  *
- * Model pin deviation from the design's literal "temperature: 0, top_p: 1"
- * wording: `claude-opus-5` / `claude-sonnet-5` / `claude-opus-4-8` / `claude-opus-4-7`
- * all REJECT the `temperature` parameter outright (400 invalid_request_error) —
- * sampling params were removed starting with the 4.7-and-later model family.
- * `temperature: 0` is only accepted on `claude-sonnet-4-6` / `claude-opus-4-6`
- * and older. Since the design's determinism requirement (decision-adjacent,
- * "Deferred Risks: LLM determinism") explicitly wants fixed decoding via
- * `temperature: 0`, and the orchestrator's task instructions explicitly ask
- * for a test asserting `temperature: 0` on the outgoing request, this adapter
- * pins to `claude-sonnet-4-6` rather than the latest model — the newest model
- * that still honors a literal temperature parameter. Flagged as a deviation
- * in apply-progress; revisit if the design's determinism story is ever
- * updated to use `output_config.effort` + omitted `thinking` instead.
+ * Pinned to the current Sonnet 5 model. `temperature: 0` is a standard,
+ * fully-supported Messages API parameter on this model — the only real
+ * constraint on `temperature` is that it must stay unset/1 when extended
+ * thinking is enabled, which this adapter never turns on. Pin the exact
+ * model id (not "latest") so `engineVersion`'s hash of analyzer/rubric
+ * versions stays meaningful across model upgrades — bump this deliberately,
+ * not silently via a floating alias.
  */
-const DEFAULT_MODEL_ID = "claude-sonnet-4-6";
+const DEFAULT_MODEL_ID = "claude-sonnet-5";
 
 const VERDICT_TOOL_NAME = "submit_verdict";
 

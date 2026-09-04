@@ -54,7 +54,7 @@ describe("LLMJudgePort provider swap", () => {
     // --- Module B: bound to AnthropicJudgeAdapter with a fake SDK client ---
     const create = vi.fn(async () => ({
       id: "msg_swap_test",
-      model: "claude-sonnet-4-6",
+      model: "claude-sonnet-5",
       stop_reason: "tool_use",
       usage: { input_tokens: 10, output_tokens: 5 },
       content: [

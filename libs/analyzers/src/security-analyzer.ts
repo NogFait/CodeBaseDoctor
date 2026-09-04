@@ -22,8 +22,9 @@ function toDomainFinding(f: RawScanFinding): Finding {
 /**
  * confidence: measured — Semgrep + OSV-Scanner findings via the
  * ScanOutputReader seam (scan-output.ts). Never invokes a scanner binary
- * directly; those run inside the network-isolated cbd-scanner container
- * per design. See spec: category-scoring.
+ * directly; those run for real inside the network-isolated cbd-scanner
+ * container (apps/worker/docker/indexer/index.js, task 3.2.8) per design.
+ * See spec: category-scoring.
  */
 export class SecurityAnalyzer implements CategoryAnalyzer {
   readonly category = "security" as const;

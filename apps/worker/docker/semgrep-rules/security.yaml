@@ -1,0 +1,55 @@
+# Curated, small, high-signal local Semgrep rule set for cbd-scanner.
+#
+# Why local rules instead of `--config auto` / `--config p/ci`: those pull
+# from Semgrep's registry over the network, which the scanner container
+# cannot do (`--network none` at scan time, per design's isolation
+# requirement — the container reading untrusted repo content must have no
+# socket at all). Vendoring a handful of high-signal, language-agnostic
+# rules here sidesteps registry-fetch entirely: `semgrep --config
+# /opt/semgrep-rules/` reads this file from disk, zero network calls, ever.
+#
+# Deliberately NOT a full registry mirror (the task explicitly scopes this
+# down to "a handful of high-signal rules is enough for an honest MVP
+# signal"). All three rules use `languages: [generic]` — semgrep's
+# regex-based generic-pattern matcher — instead of per-language AST rules,
+# so ONE rule file covers every language a repo might use without needing
+# a parser for each. This trades some precision (no real AST/taint
+# analysis) for breadth and offline-simplicity, which matches this
+# project's other "estimated"/heuristic analyzers (see maintainability,
+# performance).
+rules:
+  - id: hardcoded-secret
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Possible hardcoded credential (password/secret/API key/token) assigned
+      as a literal string. Load secrets from environment variables or a
+      secrets manager instead.
+    metadata:
+      cbd-severity: high
+    patterns:
+      - pattern-regex: '(?i)\b(password|passwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*["''][A-Za-z0-9\-_/+=]{8,}["'']'
+
+  - id: dangerous-eval
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Use of eval()/exec() on what may be dynamic or user-controlled input.
+      This can lead to arbitrary code execution — avoid eval/exec entirely,
+      or parse the input with a safe, purpose-built parser instead.
+    metadata:
+      cbd-severity: critical
+    patterns:
+      - pattern-regex: '\b(eval|exec)\s*\('
+
+  - id: sql-string-concatenation
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      SQL statement appears to be built via string concatenation rather
+      than a parameterized query. This is a common SQL-injection vector —
+      use bound parameters / a query builder / an ORM instead.
+    metadata:
+      cbd-severity: medium
+    patterns:
+      - pattern-regex: '["''](SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b.*["'']\s*\+'
