@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
 import { CATEGORY_ANALYZERS, LLM_JUDGE_PORT, type CategoryAnalyzer, type LLMJudgePort } from "@cbd/analysis";
 import { SecurityAnalyzer } from "./security-analyzer";
 import { TestingAnalyzer } from "./testing-analyzer";
@@ -20,6 +20,11 @@ import { PerformanceAnalyzer } from "./performance-analyzer";
 // Nest-resolvable token (LLM_JUDGE_PORT), constructing all 6 analyzers by
 // hand. Same array shape the design asks for; different plumbing to get
 // there.
+//
+// `@Global()`: see analysis.module.ts's comment for the DI-gap this
+// resolves and why it's `@Global()` rather than a direct import from
+// AnalysisDomainModule.
+@Global()
 @Module({
   providers: [
     {
