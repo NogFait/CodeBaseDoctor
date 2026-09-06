@@ -3,9 +3,18 @@ import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { RedisContainer, type StartedRedisContainer } from "@testcontainers/redis";
 import request from "supertest";
-import { REPO_SOURCE_PORT, LLM_JUDGE_PORT, type CategoryId, type JudgeVerdict } from "@cbd/analysis";
+import {
+  REPO_SOURCE_PORT,
+  LLM_JUDGE_PORT,
+  CATEGORY_ANALYZERS,
+  USAGE_QUOTA_PORT,
+  type CategoryAnalyzer,
+  type CategoryId,
+  type JudgeVerdict,
+} from "@cbd/analysis";
 import { ShallowCloneAdapter } from "@cbd/repo-source";
 import { startTestDatabase, type TestDatabase } from "@cbd/persistence/testing/postgres-test-db";
+import { DailyFreeTierAdapter } from "@cbd/persistence";
 import { ScriptedJudge } from "@cbd/llm/testing/scripted-judge";
 import { ProblemDetailsFilter } from "../../errors/problem-details.filter";
 import { E2eRepoSource } from "./e2e-repo-source";
@@ -81,7 +90,39 @@ export interface E2eEnvironment {
   stop(): Promise<void>;
 }
 
-export async function startE2eEnvironment(): Promise<E2eEnvironment> {
+export interface StartE2eEnvironmentOptions {
+  /**
+   * Overrides the free-tier daily quota limit exposed via `USAGE_QUOTA_PORT`
+   * on the API app ONLY — this is where `SubmitAnalysisUseCase.consume()`/
+   * `.peek()` actually run (see `submit-analysis.use-case.ts`), i.e. where
+   * `POST /analyses` observably hits 429. The worker app's own
+   * `USAGE_QUOTA_PORT` binding is deliberately left at the real
+   * `PersistenceModule` default (limit 5): `AnalysisProcessor` only ever
+   * calls `.refund()`, whose behavior (see
+   * `DailyFreeTierAdapter.refund()`) does not consult `limit` at all, so
+   * overriding it on the worker side would add nothing. Both bindings are
+   * separate `DailyFreeTierAdapter` INSTANCES but read/write the SAME real
+   * Testcontainers Postgres `quota_reservation` table, so consume()/
+   * refund() effects stay consistent across the two processes regardless
+   * of which JS instance issued them. Added for the quota-exceeded (8.3)
+   * E2E scenario, to hit 429 deterministically on a second request without
+   * needing 5 real ~60-90s pipeline runs to legitimately exhaust the
+   * production default.
+   */
+  quotaLimit?: number;
+  /**
+   * Overrides the worker app's ENTIRE `CATEGORY_ANALYZERS` array. Added
+   * ONLY for the below-threshold-refund E2E scenario (task 8.6) — see that
+   * spec file's own doc comment for why deterministically forcing 3+ REAL
+   * analyzer failures isn't practically achievable without contrived
+   * fixture/timeout engineering, and why faking only this one layer (never
+   * ingestion, which still goes through a real clone via `E2eRepoSource`)
+   * is still a legitimate E2E test of the orchestration/refund logic.
+   */
+  categoryAnalyzers?: readonly CategoryAnalyzer[];
+}
+
+export async function startE2eEnvironment(options: StartE2eEnvironmentOptions = {}): Promise<E2eEnvironment> {
   const redisContainer: StartedRedisContainer = await new RedisContainer("redis:7-alpine").start();
   const db = await startTestDatabase();
 
@@ -100,22 +141,30 @@ export async function startE2eEnvironment(): Promise<E2eEnvironment> {
   const judgeScript = new Map<CategoryId, JudgeVerdict | Error>();
   const scriptedJudge = new ScriptedJudge(judgeScript);
 
-  const apiModuleRef = await Test.createTestingModule({ imports: [ApiModule] })
+  let apiBuilder = Test.createTestingModule({ imports: [ApiModule] })
     .overrideProvider(REPO_SOURCE_PORT)
-    .useValue(repoSource)
-    .compile();
+    .useValue(repoSource);
+  if (options.quotaLimit !== undefined) {
+    apiBuilder = apiBuilder
+      .overrideProvider(USAGE_QUOTA_PORT)
+      .useValue(new DailyFreeTierAdapter(db.prisma, { limit: options.quotaLimit }));
+  }
+  const apiModuleRef = await apiBuilder.compile();
   const apiApp = apiModuleRef.createNestApplication();
   // Mirrors apps/api/src/main.ts's own bootstrap wiring exactly (the filter
   // has zero DI deps of its own, wired at the bootstrap edge there too).
   apiApp.useGlobalFilters(new ProblemDetailsFilter());
   await apiApp.init();
 
-  const workerModuleRef = await Test.createTestingModule({ imports: [WorkerModule] })
+  let workerBuilder = Test.createTestingModule({ imports: [WorkerModule] })
     .overrideProvider(REPO_SOURCE_PORT)
     .useValue(repoSource)
     .overrideProvider(LLM_JUDGE_PORT)
-    .useValue(scriptedJudge)
-    .compile();
+    .useValue(scriptedJudge);
+  if (options.categoryAnalyzers !== undefined) {
+    workerBuilder = workerBuilder.overrideProvider(CATEGORY_ANALYZERS).useValue(options.categoryAnalyzers);
+  }
+  const workerModuleRef = await workerBuilder.compile();
   const workerApp = workerModuleRef.createNestApplication();
   // `.init()` (not just `.compile()`) is required for the real BullMQ
   // Worker to actually start: `@nestjs/bullmq`'s `@Processor`/`WorkerHost`

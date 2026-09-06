@@ -4,6 +4,7 @@ import {
   QuotaExceededError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  TooManyFilesError,
 } from "@cbd/analysis";
 
 /**
@@ -58,6 +59,24 @@ export function mapErrorToProblem(error: unknown): MappedProblem {
       type: "/errors/repo-too-large",
       title: "Repo exceeds ingestion size limits",
       extra: { limits: error.limits, actual: error.actual },
+    };
+  }
+
+  if (error instanceof TooManyFilesError) {
+    // SAME type/status as RepoTooLargeError, deliberately — see design's
+    // RFC 9457 error-type table and spec `repo-ingestion`'s "Reject
+    // oversized repositories" requirement: the byte-size gate and the
+    // file-count gate (this one, thrown by
+    // ShallowCloneAdapter.materialize()'s ls-tree count check) are one
+    // "oversized repo" semantic, not two distinct error types. `maxBytes`
+    // is omitted from `limits` here (unlike RepoTooLargeError's mapping) —
+    // TooManyFilesError genuinely carries no byte-size information to
+    // report.
+    return {
+      status: 422,
+      type: "/errors/repo-too-large",
+      title: "Repo exceeds ingestion size limits",
+      extra: { limits: { maxFiles: error.maxFiles }, actual: { files: error.actualFiles } },
     };
   }
 

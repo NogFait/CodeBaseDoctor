@@ -5,6 +5,7 @@ import {
   QuotaExceededError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  TooManyFilesError,
 } from "@cbd/analysis";
 import { mapErrorToProblem } from "./problem-details";
 
@@ -52,6 +53,23 @@ describe("mapErrorToProblem", () => {
   it("clamps Retry-After to 0 for an already-past resetsAt (never a negative header value)", () => {
     const mapped = mapErrorToProblem(new QuotaExceededError("actor-1", 5, new Date(Date.now() - 1000)));
     expect(mapped.headers?.["Retry-After"]).toBe("0");
+  });
+
+  it("maps TooManyFilesError to the SAME 422 /errors/repo-too-large type as RepoTooLargeError (task 8.4 gap check)", () => {
+    // Per spec `repo-ingestion`'s "Reject oversized repositories" requirement,
+    // the 500MB-or-more byte gate (RepoTooLargeError) and the 50k-files gate
+    // (TooManyFilesError, thrown by ShallowCloneAdapter.materialize()'s
+    // ls-tree count check — see shallow-clone-adapter.ts) are meant to
+    // surface as the SAME "oversized repo" semantic, not two distinct error
+    // types. Before this test, only RepoTooLargeError was mapped here —
+    // TooManyFilesError fell through to the generic 500 branch.
+    const mapped = mapErrorToProblem(new TooManyFilesError(50_000, 50_010));
+    expect(mapped.status).toBe(422);
+    expect(mapped.type).toBe("/errors/repo-too-large");
+    expect(mapped.extra).toMatchObject({
+      limits: { maxFiles: 50_000 },
+      actual: { files: 50_010 },
+    });
   });
 
   it("maps a Nest HttpException (e.g. NotFoundException) to its own status, not a flat 500", () => {
