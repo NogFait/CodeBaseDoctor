@@ -8,6 +8,7 @@ import type { CategoryScore } from "../domain";
 import { AnalysisBelowThresholdError } from "../domain";
 import type { CategoryAnalyzer, RepoScan } from "../ports";
 import { RepoAnalysisService } from "./repo-analysis.service";
+import type { AnalyzerProgressEvent } from "./analyzer-runner";
 
 const FIXTURE_DIR = path.resolve(__dirname, "../../../analyzers/__fixtures__/well-tested-ts");
 const REPO_URL = "https://github.com/fixture/well-tested-ts";
@@ -165,6 +166,33 @@ describe("RepoAnalysisService", () => {
 
     expect(quota.refundCalls).toEqual([RESERVATION_ID]);
     expect(await scores.listByRepo(REPO_URL, 10)).toHaveLength(0);
+  });
+
+  it("(f) onProgress, when passed, is forwarded to the runner and fires for every analyzer (task 4.4 plumbing)", async () => {
+    const { service } = buildService(allSixAnalyzers());
+    const events: AnalyzerProgressEvent[] = [];
+
+    const scan = await service.analyze(
+      { repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId: RESERVATION_ID },
+      (event) => events.push(event),
+    );
+
+    expect(scan.status).toBe("complete");
+    const runningCategories = events.filter((e) => e.type === "running").map((e) => e.category).sort();
+    const settledCategories = events.filter((e) => e.type === "settled").map((e) => e.category).sort();
+    expect(runningCategories).toEqual(
+      ["architecture", "documentation", "maintainability", "performance", "security", "testing"],
+    );
+    expect(settledCategories).toEqual(runningCategories);
+  });
+
+  it("(g) omitting onProgress changes nothing about the existing behavior (default no-op)", async () => {
+    const { service, quota } = buildService(allSixAnalyzers());
+
+    const scan = await service.analyze({ repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId: RESERVATION_ID });
+
+    expect(scan.status).toBe("complete");
+    expect(quota.refundCalls).toHaveLength(0);
   });
 
   it("(e) the thrown error carries the scoredCount and the underlying report", async () => {

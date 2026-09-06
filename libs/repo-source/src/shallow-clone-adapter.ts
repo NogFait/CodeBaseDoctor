@@ -3,6 +3,7 @@ import {
   CloneTimeoutError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  ScanTimeoutError,
   TooManyFilesError,
   MAX_READABLE_FILE_BYTES,
   FileTooLargeError,
@@ -68,6 +69,21 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
 };
 const DOMINANT_LANGUAGE_SHARE_THRESHOLD = 0.4;
 
+/**
+ * Default scanner-container timeout budget. See design: "Timeouts are
+ * layered ... container `timeout` wrapper (clone 120s, scan 300s)". Unlike
+ * `cloneTimeoutMs` (a field on the port-level `IngestionLimits`, threaded
+ * through every `materialize()` call site), this is a constructor option on
+ * the adapter itself — matching `fetcherImage`/`scannerImage`'s existing
+ * pattern — because `IngestionLimits` is a shared port interface consumed
+ * by every `RepoSourcePort` implementation (including `FixtureRepoSource`
+ * and every test constructing a plain `IngestionLimits` literal); adding a
+ * required field there would force updating every such call site across the
+ * codebase for a value that, unlike `cloneTimeoutMs`, no current requirement
+ * asks callers to override per-request.
+ */
+const DEFAULT_SCAN_TIMEOUT_MS = 300_000;
+
 interface RunResult {
   exitCode: number;
   stdout: string;
@@ -92,6 +108,8 @@ export interface ShallowCloneAdapterOptions {
   docker?: Docker;
   fetcherImage?: string;
   scannerImage?: string;
+  /** Scanner-container step timeout (Semgrep + OSV-Scanner run). Defaults to `DEFAULT_SCAN_TIMEOUT_MS` (300s). See class doc / design's layered-timeouts table. */
+  scanTimeoutMs?: number;
 }
 
 /**
@@ -148,11 +166,13 @@ export class ShallowCloneAdapter implements RepoSourcePort {
   private readonly docker: Docker;
   private readonly fetcherImage: string;
   private readonly scannerImage: string;
+  private readonly scanTimeoutMs: number;
 
   constructor(options: ShallowCloneAdapterOptions = {}) {
     this.docker = options.docker ?? new Docker();
     this.fetcherImage = options.fetcherImage ?? "cbd-fetcher:local";
     this.scannerImage = options.scannerImage ?? "cbd-scanner:local";
+    this.scanTimeoutMs = options.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS;
   }
 
   async resolve(url: string): Promise<RepoRef> {
@@ -263,6 +283,9 @@ export class ShallowCloneAdapter implements RepoSourcePort {
       }
 
       const indexResult = await this.runScanner({ volumeName });
+      if (indexResult.timedOut) {
+        throw new ScanTimeoutError(this.scanTimeoutMs);
+      }
       if (indexResult.exitCode !== 0) {
         throw new Error(`cbd-scanner indexing failed: ${indexResult.stderr}`);
       }
@@ -425,12 +448,13 @@ export class ShallowCloneAdapter implements RepoSourcePort {
     });
   }
 
-  private async runScanner(opts: { volumeName: string }): Promise<RunResult> {
+  private async runScanner(opts: { volumeName: string }): Promise<RunResult & { timedOut?: boolean }> {
     return this.runContainer({
       image: this.scannerImage,
       cmd: [REPO_DIR],
       network: "none",
       volume: { name: opts.volumeName, mountPath: MOUNT_DIR, readOnly: true },
+      timeoutMs: this.scanTimeoutMs,
       memory: 2 * 1024 * 1024 * 1024,
       pidsLimit: 512,
       nanoCpus: 2_000_000_000,

@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CloneTimeoutError, RepoNotAccessibleError, RepoTooLargeError, TooManyFilesError } from "@cbd/analysis";
+import {
+  CloneTimeoutError,
+  RepoNotAccessibleError,
+  RepoTooLargeError,
+  ScanTimeoutError,
+  TooManyFilesError,
+} from "@cbd/analysis";
 import type { RepoRef } from "@cbd/analysis";
 import { ShallowCloneAdapter } from "./shallow-clone-adapter";
 import { startGitFixtureServer, waitForPort, type GitFixtureServer } from "../testing/git-fixture-server";
@@ -136,5 +142,22 @@ describe("ShallowCloneAdapter — real Docker integration", () => {
     await expect(
       adapter.materialize(refFor(server, "small-repo"), "4".repeat(40), impossibleTimeout),
     ).rejects.toThrow(CloneTimeoutError);
+  });
+
+  it("materialize() throws ScanTimeoutError when the scanner-container step exceeds its own (separate) timeout budget", async () => {
+    // Own adapter instance with an impossibly short scanTimeoutMs — the
+    // clone/du/file-count gates all still get their normal generous
+    // budget, only the scanner-container step (Semgrep + OSV-Scanner) is
+    // starved, proving this is a genuinely separate timeout layer from
+    // CloneTimeoutError's clone-step budget above.
+    const shortScanAdapter = new ShallowCloneAdapter({
+      fetcherImage: "cbd-fetcher:local",
+      scannerImage: "cbd-scanner:local",
+      scanTimeoutMs: 1,
+    });
+
+    await expect(
+      shortScanAdapter.materialize(refFor(server, "small-repo"), "5".repeat(40), GENEROUS_LIMITS),
+    ).rejects.toThrow(ScanTimeoutError);
   });
 });

@@ -45,6 +45,22 @@ export class CloneTimeoutError extends Error {
   }
 }
 
+/**
+ * Thrown when the scanner-container step (Semgrep + OSV-Scanner) does not
+ * complete within its own timeout budget — a distinct layer from
+ * `CloneTimeoutError`'s clone-step budget. See design: "Timeouts are
+ * layered ... container `timeout` wrapper (clone 120s, scan 300s)". Kept as
+ * its own class (not an overload of `CloneTimeoutError`) so callers can
+ * distinguish which ingestion phase actually failed for accurate error
+ * reporting.
+ */
+export class ScanTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`Scan did not complete within ${timeoutMs}ms`);
+    this.name = "ScanTimeoutError";
+  }
+}
+
 export class QuotaExceededError extends Error {
   constructor(
     public readonly actorId: string,

@@ -157,6 +157,106 @@ describe("AnalysisJobRepository (Testcontainers Postgres)", () => {
     expect(record?.status).toBe("queued");
   });
 
+  it("updateCategoryStatus() updates only the targeted (jobId, category) row, never touching the other 5", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+
+    await repo.updateCategoryStatus(id, "security", {
+      status: "scored",
+      score: 87,
+      confidence: "measured",
+      rationale: "clean scan",
+      findings: [{ ruleId: "x", severity: "low", message: "m" }],
+      durationMs: 1234,
+    });
+
+    const record = await repo.findById(id);
+    const security = record?.categories.find((c) => c.category === "security");
+    expect(security?.status).toBe("scored");
+    expect(security?.score).toBe(87);
+    expect(security?.confidence).toBe("measured");
+    expect(security?.rationale).toBe("clean scan");
+    expect(security?.findings).toEqual([{ ruleId: "x", severity: "low", message: "m" }]);
+    expect(security?.durationMs).toBe(1234);
+
+    const others = record?.categories.filter((c) => c.category !== "security") ?? [];
+    expect(others).toHaveLength(5);
+    expect(others.every((c) => c.status === "pending")).toBe(true);
+    expect(others.every((c) => c.score === null)).toBe(true);
+  });
+
+  it("updateCategoryStatus() can mark a category 'running' then 'failed' with an errorCode, without score/rationale", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+
+    await repo.updateCategoryStatus(id, "architecture", { status: "running" });
+    const mid = await repo.findById(id);
+    expect(mid?.categories.find((c) => c.category === "architecture")?.status).toBe("running");
+
+    await repo.updateCategoryStatus(id, "architecture", { status: "failed", errorCode: "LLM_TIMEOUT" });
+    const after = await repo.findById(id);
+    const architecture = after?.categories.find((c) => c.category === "architecture");
+    expect(architecture?.status).toBe("failed");
+    expect(architecture?.errorCode).toBe("LLM_TIMEOUT");
+  });
+
+  it("updateCategoryStatus() concurrent updates to 2 DIFFERENT categories both land correctly (no lost updates)", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+
+    await Promise.all([
+      repo.updateCategoryStatus(id, "security", { status: "scored", score: 90 }),
+      repo.updateCategoryStatus(id, "testing", { status: "scored", score: 40 }),
+    ]);
+
+    const record = await repo.findById(id);
+    expect(record?.categories.find((c) => c.category === "security")?.score).toBe(90);
+    expect(record?.categories.find((c) => c.category === "testing")?.score).toBe(40);
+    expect(record?.categories.find((c) => c.category === "security")?.status).toBe("scored");
+    expect(record?.categories.find((c) => c.category === "testing")?.status).toBe("scored");
+  });
+
+  it("findStale() returns a job whose startedAt is older than the cutoff and still non-terminal", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+    await repo.updateStatus(id, "analyzing");
+
+    // Backdate startedAt directly — no real 15-minute wait needed.
+    const oldStartedAt = new Date(Date.now() - 20 * 60 * 1000);
+    await db.prisma.analysisJob.update({ where: { id }, data: { startedAt: oldStartedAt } });
+
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const stale = await repo.findStale(cutoff);
+
+    expect(stale.map((s) => s.id)).toContain(id);
+  });
+
+  it("findStale() does not return a fresh (recently-started) job", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+    await repo.updateStatus(id, "analyzing"); // startedAt = now
+
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const stale = await repo.findStale(cutoff);
+
+    expect(stale.map((s) => s.id)).not.toContain(id);
+  });
+
+  it("findStale() does not return a terminal-status job even if started long ago (already finished, not stuck)", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+    await repo.updateStatus(id, "analyzing");
+    await repo.updateStatus(id, "completed_partial");
+
+    const oldStartedAt = new Date(Date.now() - 20 * 60 * 1000);
+    await db.prisma.analysisJob.update({ where: { id }, data: { startedAt: oldStartedAt } });
+
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const stale = await repo.findStale(cutoff);
+
+    expect(stale.map((s) => s.id)).not.toContain(id);
+  });
+
   it("rejects a second job created with an already-used reservationId (unique constraint)", async () => {
     const repo = new AnalysisJobRepository(db.prisma);
     const reservationId = randomUUID();

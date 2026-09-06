@@ -1,4 +1,4 @@
-import { PrismaClient, type JobStatus, type CategoryStatus } from "@prisma/client";
+import { PrismaClient, Prisma, type JobStatus, type CategoryStatus } from "@prisma/client";
 import type { CategoryId } from "@cbd/analysis";
 
 /**
@@ -82,6 +82,21 @@ export interface UpdateAnalysisJobStatusExtra {
   bullJobId?: string;
 }
 
+export interface UpdateCategoryStatusInput {
+  status: CategoryStatus;
+  score?: number | null;
+  confidence?: string | null;
+  rationale?: string | null;
+  findings?: unknown;
+  errorCode?: string | null;
+  durationMs?: number | null;
+}
+
+export interface StaleAnalysisJob {
+  id: string;
+  reservationId: string;
+}
+
 export class AnalysisJobRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -156,6 +171,50 @@ export class AnalysisJobRepository {
 
   async attachBullJobId(id: string, bullJobId: string): Promise<void> {
     await this.prisma.analysisJob.update({ where: { id }, data: { bullJobId } });
+  }
+
+  /**
+   * Plain `UPDATE analysis_job_category SET ... WHERE job_id=$1 AND
+   * category=$2`, targeting exactly one `(jobId, category)` row via the
+   * table's own composite primary key. Task 4.4's "no lost updates"
+   * requirement is structurally guaranteed by the schema, not by this
+   * method: concurrent calls for two DIFFERENT categories touch two
+   * different rows and can never conflict (see the concurrency test in the
+   * integration spec).
+   */
+  async updateCategoryStatus(jobId: string, category: CategoryId, update: UpdateCategoryStatusInput): Promise<void> {
+    await this.prisma.analysisJobCategory.update({
+      where: { jobId_category: { jobId, category } },
+      data: {
+        status: update.status,
+        ...(update.score !== undefined ? { score: update.score } : {}),
+        ...(update.confidence !== undefined ? { confidence: update.confidence } : {}),
+        ...(update.rationale !== undefined ? { rationale: update.rationale } : {}),
+        ...(update.findings !== undefined ? { findings: update.findings as Prisma.InputJsonValue } : {}),
+        ...(update.errorCode !== undefined ? { errorCode: update.errorCode } : {}),
+        ...(update.durationMs !== undefined ? { durationMs: update.durationMs } : {}),
+      },
+    });
+  }
+
+  /**
+   * Jobs that started but never reached a terminal status and are older
+   * than `olderThan` — the watchdog's (task 6.3) query. `startedAt: {lt:
+   * olderThan}` already excludes NULL `startedAt` rows by plain SQL
+   * comparison semantics (a job still queued, never dequeued, is never
+   * "stuck" in the watchdog's sense) — no separate `IS NOT NULL` clause
+   * needed. `TERMINAL_STATUSES` is reused, not redefined, from
+   * `updateStatus()`'s own module-level constant.
+   */
+  async findStale(olderThan: Date): Promise<StaleAnalysisJob[]> {
+    const rows = await this.prisma.analysisJob.findMany({
+      where: {
+        startedAt: { lt: olderThan },
+        status: { notIn: [...TERMINAL_STATUSES] },
+      },
+      select: { id: true, reservationId: true },
+    });
+    return rows;
   }
 
   private toRecord(row: {

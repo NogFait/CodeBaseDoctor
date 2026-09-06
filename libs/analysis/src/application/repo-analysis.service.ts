@@ -11,7 +11,7 @@ import {
   type ScoreRepositoryPort,
   type UsageQuotaPort,
 } from "../ports";
-import { AnalyzerRunner } from "./analyzer-runner";
+import { AnalyzerRunner, type AnalyzerProgressCallback } from "./analyzer-runner";
 import { ScoreAggregator } from "./score-aggregator";
 
 /**
@@ -83,7 +83,7 @@ export class RepoAnalysisService {
    * swallowed — the caller (a future API/worker layer) maps them onto the
    * right HTTP status / job status.
    */
-  async analyze(request: AnalyzeRepoRequest): Promise<RepoScan> {
+  async analyze(request: AnalyzeRepoRequest, onProgress?: AnalyzerProgressCallback): Promise<RepoScan> {
     const ref = await this.repoSource.resolve(request.repoUrl);
     const metadata = await this.repoSource.head(ref);
 
@@ -103,7 +103,7 @@ export class RepoAnalysisService {
 
     const workspace = await this.repoSource.materialize(ref, metadata.headSha, DEFAULT_INGESTION_LIMITS);
     try {
-      const categories = await this.runner.run(this.analyzers, workspace.context);
+      const categories = await this.runner.run(this.analyzers, workspace.context, onProgress);
       const report = this.aggregator.aggregate(categories, {
         repoUrl: ref.url,
         commitSha: metadata.headSha,

@@ -46,6 +46,19 @@ export class AnalyzerTimeoutError extends Error {
   }
 }
 
+/**
+ * Emitted by `AnalyzerRunner.run()`'s optional `onProgress` callback — the
+ * domain-side plumbing task 4.4 (per-category live progress) needs. A
+ * caller (task 6.2's `AnalysisProcessor`) uses this to write
+ * `analysis_job_category` rows as each analyzer starts and settles, without
+ * `AnalyzerRunner` itself knowing anything about persistence.
+ */
+export type AnalyzerProgressEvent =
+  | { type: "running"; category: CategoryId }
+  | { type: "settled"; category: CategoryId; score: CategoryScore };
+
+export type AnalyzerProgressCallback = (event: AnalyzerProgressEvent) => void;
+
 export interface AnalyzerRunnerOptions {
   /**
    * Overrides `DEFAULT_TIMEOUT_MS_BY_CATEGORY` per category. Production
@@ -71,8 +84,19 @@ export class AnalyzerRunner {
     this.timeoutMsByCategory = options.timeoutMsByCategory ?? {};
   }
 
-  async run(analyzers: readonly CategoryAnalyzer[], ctx: RepoContext): Promise<CategoryScore[]> {
-    const settled = await Promise.allSettled(analyzers.map((analyzer) => this.runOne(analyzer, ctx)));
+  async run(
+    analyzers: readonly CategoryAnalyzer[],
+    ctx: RepoContext,
+    onProgress?: AnalyzerProgressCallback,
+  ): Promise<CategoryScore[]> {
+    const settled = await Promise.allSettled(
+      analyzers.map(async (analyzer) => {
+        onProgress?.({ type: "running", category: analyzer.category });
+        const score = await this.runOne(analyzer, ctx);
+        onProgress?.({ type: "settled", category: analyzer.category, score });
+        return score;
+      }),
+    );
     return settled.map((outcome, index) =>
       outcome.status === "fulfilled" ? outcome.value : this.toFailedScore(analyzers[index], outcome.reason, 0),
     );

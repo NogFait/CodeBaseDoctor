@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StubAnalyzer } from "../../testing/stub-analyzer";
 import type { RepoContext } from "../domain";
 import type { CategoryAnalyzer } from "../ports";
-import { AnalyzerRunner, DEFAULT_TIMEOUT_MS_BY_CATEGORY } from "./analyzer-runner";
+import { AnalyzerRunner, DEFAULT_TIMEOUT_MS_BY_CATEGORY, type AnalyzerProgressEvent } from "./analyzer-runner";
 
 function fakeRepoContext(): RepoContext {
   return {
@@ -178,6 +178,99 @@ describe("AnalyzerRunner", () => {
 
     expect(signals).toHaveLength(2);
     expect(signals[0]).not.toBe(signals[1]);
+  });
+
+  describe("onProgress callback (task 4.4 plumbing)", () => {
+    it("is optional — omitting it changes nothing about the existing behavior", async () => {
+      const security = new StubAnalyzer({
+        category: "security",
+        result: {
+          category: "security",
+          status: "scored",
+          score: 90,
+          confidence: "measured",
+          weightCap: 1,
+          rationale: "clean",
+          findings: [],
+          durationMs: 5,
+        },
+      });
+      const runner = new AnalyzerRunner();
+
+      const results = await runner.run([security], fakeRepoContext());
+
+      expect(results).toHaveLength(1);
+      expect(results[0].status).toBe("scored");
+    });
+
+    it("fires 'running' before an analyzer starts, then 'settled' with its final CategoryScore, in order, for a successful analyzer", async () => {
+      const events: AnalyzerProgressEvent[] = [];
+      const okScore = {
+        category: "testing" as const,
+        status: "scored" as const,
+        score: 71,
+        confidence: "estimated" as const,
+        weightCap: 1,
+        rationale: "ok",
+        findings: [],
+        durationMs: 5,
+      };
+      const testing = new StubAnalyzer({ category: "testing", result: okScore });
+      const runner = new AnalyzerRunner();
+
+      await runner.run([testing], fakeRepoContext(), (event) => events.push(event));
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toEqual({ type: "running", category: "testing" });
+      expect(events[1]).toEqual({ type: "settled", category: "testing", score: okScore });
+    });
+
+    it("fires 'settled' with a status:'failed' CategoryScore (never a rejection) when the analyzer throws", async () => {
+      const events: AnalyzerProgressEvent[] = [];
+      const boom = new Error("architecture blew up");
+      const architecture = new StubAnalyzer({ category: "architecture", error: boom });
+      const runner = new AnalyzerRunner();
+
+      await runner.run([architecture], fakeRepoContext(), (event) => events.push(event));
+
+      expect(events[0]).toEqual({ type: "running", category: "architecture" });
+      expect(events[1].type).toBe("settled");
+      expect(events[1]).toMatchObject({ type: "settled", category: "architecture" });
+      if (events[1].type === "settled") {
+        expect(events[1].score.status).toBe("failed");
+        expect(events[1].score.error?.message).toContain("architecture blew up");
+      }
+    });
+
+    it("fires 'running' for every analyzer before any 'settled' arrives, under concurrent fan-out (2+ analyzers)", async () => {
+      const events: AnalyzerProgressEvent[] = [];
+      const scoreFor = (category: CategoryAnalyzer["category"]) => ({
+        category,
+        status: "scored" as const,
+        score: 50,
+        confidence: "measured" as const,
+        weightCap: 1,
+        rationale: "ok",
+        findings: [],
+        durationMs: 5,
+      });
+      const security = new StubAnalyzer({ category: "security", result: scoreFor("security") });
+      const testing = new StubAnalyzer({ category: "testing", result: scoreFor("testing") });
+      const runner = new AnalyzerRunner();
+
+      await runner.run([security, testing], fakeRepoContext(), (event) => events.push(event));
+
+      expect(events).toHaveLength(4);
+      const runningEvents = events.filter((e) => e.type === "running");
+      const settledEvents = events.filter((e) => e.type === "settled");
+      expect(runningEvents.map((e) => e.category).sort()).toEqual(["security", "testing"]);
+      expect(settledEvents.map((e) => e.category).sort()).toEqual(["security", "testing"]);
+      // Both 'running' events land before either 'settled' — proven by index
+      // comparison rather than assuming settle order across analyzers.
+      const lastRunningIndex = Math.max(...runningEvents.map((e) => events.indexOf(e)));
+      const firstSettledIndex = Math.min(...settledEvents.map((e) => events.indexOf(e)));
+      expect(lastRunningIndex).toBeLessThan(firstSettledIndex);
+    });
   });
 
   describe("DEFAULT_TIMEOUT_MS_BY_CATEGORY", () => {

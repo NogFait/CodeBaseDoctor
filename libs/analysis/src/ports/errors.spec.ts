@@ -5,6 +5,7 @@ import {
   QuotaExceededError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  ScanTimeoutError,
   TooManyFilesError,
 } from "./errors";
 
@@ -41,6 +42,13 @@ describe("port error classes", () => {
   it("CloneTimeoutError carries the configured timeout", () => {
     const err = new CloneTimeoutError(120_000);
     expect(err.timeoutMs).toBe(120_000);
+  });
+
+  it("ScanTimeoutError carries the configured timeout and is distinct from CloneTimeoutError", () => {
+    const err = new ScanTimeoutError(300_000);
+    expect(err.name).toBe("ScanTimeoutError");
+    expect(err.timeoutMs).toBe(300_000);
+    expect(err).not.toBeInstanceOf(CloneTimeoutError);
   });
 
   it("QuotaExceededError carries actor, limit, and reset time", () => {
