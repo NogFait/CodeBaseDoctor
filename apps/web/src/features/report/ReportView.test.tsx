@@ -58,14 +58,14 @@ describe("ReportView — completed", () => {
       <ReportView repoUrl="https://github.com/owner/repo" status="completed" result={scan()} onRescanSubmitted={vi.fn()} />,
     );
 
-    const testingCard = screen.getByRole("heading", { name: "testing" }).closest("li")!;
+    const testingCard = screen.getByRole("heading", { name: /testing/i }).closest("li")!;
     expect(within(testingCard).getByText("Estimated")).toBeInTheDocument();
     expect(within(testingCard).getByText(/78/)).toBeInTheDocument();
 
-    const performanceCard = screen.getByRole("heading", { name: "performance" }).closest("li")!;
+    const performanceCard = screen.getByRole("heading", { name: /performance/i }).closest("li")!;
     expect(within(performanceCard).getByText("Low confidence — static estimate")).toBeInTheDocument();
 
-    const securityCard = screen.getByRole("heading", { name: "security" }).closest("li")!;
+    const securityCard = screen.getByRole("heading", { name: /security/i }).closest("li")!;
     expect(within(securityCard).getByText("Measured")).toBeInTheDocument();
     expect(within(securityCard).getByText("No critical findings.")).toBeInTheDocument();
 
@@ -115,9 +115,9 @@ describe("ReportView — completed_partial", () => {
       />,
     );
 
-    const docCard = screen.getByRole("heading", { name: "documentation" }).closest("li")!;
+    const docCard = screen.getByRole("heading", { name: /documentation/i }).closest("li")!;
     expect(within(docCard).getByText("Could not be scored")).toBeInTheDocument();
-    const securityCard = screen.getByRole("heading", { name: "security" }).closest("li")!;
+    const securityCard = screen.getByRole("heading", { name: /security/i }).closest("li")!;
     expect(within(securityCard).getByText(/78/)).toBeInTheDocument();
 
     await user.click(within(docCard).getByRole("button", { name: /retry/i }));
@@ -193,5 +193,20 @@ describe("ReportView — analyze another repo", () => {
 
     await user.click(screen.getByRole("button", { name: /analyze another repo/i }));
     expect(onStartOver).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ReportView — localized category names", () => {
+  it("renders the 6 category card headings in the active locale (es)", () => {
+    render(
+      <ReportView repoUrl="https://github.com/owner/repo" status="completed" result={scan()} onRescanSubmitted={vi.fn()} />,
+      { locale: "es" },
+    );
+
+    for (const name of ["Arquitectura", "Seguridad", "Testing", "Mantenibilidad", "Rendimiento", "Documentación"]) {
+      expect(screen.getByRole("heading", { name })).toBeInTheDocument();
+    }
+    // rationale text stays verbatim from the backend (i18n scope: chrome only)
+    expect(screen.getByText("No critical findings.")).toBeInTheDocument();
   });
 });

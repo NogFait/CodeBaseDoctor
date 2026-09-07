@@ -1,7 +1,7 @@
 import { RescanButton } from "../rescan/RescanButton";
 import { confidenceBadgeLabel } from "./confidence-badge";
 import { formatProblemMessage, type ProblemDetails } from "../../api/problem-details";
-import { useT } from "../../i18n";
+import { useT, CATEGORY_KEYS, labelFor } from "../../i18n";
 import type { RepoScan, SubmitAnalysisResponse } from "../../api/types";
 
 export interface ReportViewProps {
@@ -26,9 +26,9 @@ const startOverClass =
  * (scored cards + a retry affordance on the unscored one), and `failed`
  * (no `result` — failure message + explicit quota-refund notice).
  *
- * Note: category names (`categoryScore.category`) and the analyzer
- * `rationale` text are rendered verbatim as the backend produced them and
- * are deliberately not localized (i18n scope: UI chrome only). */
+ * Note: category display names are localized (`CATEGORY_KEYS`), but the
+ * analyzer `rationale` text is rendered verbatim as the backend produced it
+ * (i18n scope: UI chrome only — rationales come from the analyzers / LLM). */
 export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem, onStartOver }: ReportViewProps) {
   const t = useT();
 
@@ -78,7 +78,7 @@ export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem
             key={categoryScore.category}
             className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
           >
-            <h3 className="text-sm font-semibold capitalize text-slate-900">{categoryScore.category}</h3>
+            <h3 className="text-sm font-semibold text-slate-900">{labelFor(t, CATEGORY_KEYS, categoryScore.category)}</h3>
             {categoryScore.status === "scored" ? (
               <>
                 <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{categoryScore.score}</p>

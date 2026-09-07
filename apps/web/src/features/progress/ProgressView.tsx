@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getAnalysisStatus } from "../../api/client";
-import { useT, type MessageKey, type TFunction } from "../../i18n";
+import { useT, CATEGORY_KEYS, labelFor, type MessageKey } from "../../i18n";
 import type { ProblemDetails } from "../../api/problem-details";
 import type { AnalysisProgressCategory, TerminalAnalysisStatusResponse } from "../../api/types";
-
-const CATEGORY_KEYS: Record<string, MessageKey> = {
-  architecture: "category.architecture",
-  security: "category.security",
-  testing: "category.testing",
-  maintainability: "category.maintainability",
-  performance: "category.performance",
-  documentation: "category.documentation",
-};
 
 const STATUS_KEYS: Record<string, MessageKey> = {
   pending: "progress.status.pending",
@@ -20,13 +11,6 @@ const STATUS_KEYS: Record<string, MessageKey> = {
   failed: "progress.status.failed",
   skipped: "progress.status.skipped",
 };
-
-/** Localize a known category id / progress status word, falling back to the
- * raw backend value for anything unmapped so the row never shows a bare key. */
-function labelFor(t: TFunction, table: Record<string, MessageKey>, value: string): string {
-  const key = table[value];
-  return key ? t(key) : value;
-}
 
 /** Built for any poll rejection — an `ApiError` (any non-2xx problem+json,
  * including the 504 scan-timeout terminal case) or a raw network failure
