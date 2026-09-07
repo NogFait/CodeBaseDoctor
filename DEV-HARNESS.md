@@ -134,14 +134,14 @@ docker compose up -d           # postgres (host 5433 via docker-compose.override
 until [ "$(docker inspect -f '{{.State.Health.Status}}' cbd-postgres)" = healthy ] \
    && [ "$(docker inspect -f '{{.State.Health.Status}}' cbd-redis)" = healthy ]; do sleep 2; done
 
-# --- 2. prisma -----------------------------------------------------------------
+# --- 2. prisma --------------------------------------------------------------
+# Both scripts load the repo-root .env themselves (dotenv -e ../../.env).
 pnpm --filter @cbd/persistence prisma:generate
-DATABASE_URL='postgresql://cbd:cbd@localhost:5433/codebase_doctor' \
-  pnpm --filter @cbd/persistence prisma:migrate   # applies 20260814000000_init
+pnpm --filter @cbd/persistence prisma:migrate   # applies the migrations in prisma/migrations
 
-# --- 3. app processes (each in its own shell; export env or rely on .env) -----
-export DATABASE_URL='postgresql://cbd:cbd@localhost:5433/codebase_doctor' \
-       REDIS_HOST=localhost REDIS_PORT=6379 PORT=3000 LLM_JUDGE=stub
+# --- 3. app processes (each in its own shell) ------------------------------
+# api + worker load ../../.env via tsx --env-file-if-exists; web (vite) needs
+# nothing on the host. No manual `export` required.
 
 pnpm --filter @cbd/api    start:dev     # Nest HTTP on :3000  ("Mapped {/analyses, POST}")
 pnpm --filter @cbd/worker start:dev     # headless BullMQ consumer (Redis bzpopmin on 'analysis')
