@@ -4,7 +4,10 @@
     "outDir": "dist",
     "rootDir": "src",
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }
