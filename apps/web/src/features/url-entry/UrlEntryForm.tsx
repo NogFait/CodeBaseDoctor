@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useSubmitAnalysis } from "../submit-analysis/use-submit-analysis";
+import { useT } from "../../i18n";
 import type { SubmitAnalysisResponse } from "../../api/types";
 
 export interface UrlEntryFormProps {
@@ -14,6 +15,7 @@ export interface UrlEntryFormProps {
  * Submit/pending/error handling is the shared `useSubmitAnalysis` hook —
  * identical to `RescanButton`'s. */
 export function UrlEntryForm({ onSubmitted }: UrlEntryFormProps) {
+  const t = useT();
   const [repoUrl, setRepoUrl] = useState("");
   const { submit, pending, error } = useSubmitAnalysis(onSubmitted);
 
@@ -28,7 +30,7 @@ export function UrlEntryForm({ onSubmitted }: UrlEntryFormProps) {
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
     >
       <label htmlFor="repoUrl" className="block text-sm font-medium text-slate-700">
-        GitHub repo URL
+        {t("urlEntry.label")}
       </label>
       <input
         id="repoUrl"
@@ -45,7 +47,7 @@ export function UrlEntryForm({ onSubmitted }: UrlEntryFormProps) {
         disabled={pending}
         className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
       >
-        {pending ? "Scanning…" : "Scan repo"}
+        {pending ? t("urlEntry.submitting") : t("urlEntry.submit")}
       </button>
       {error && (
         <p

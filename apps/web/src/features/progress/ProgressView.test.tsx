@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { act } from "react";
 import { ProgressView } from "./ProgressView";
+// Wraps in <I18nProvider> forced to `en`. Category display names ARE
+// localized (task requirement), so the row text below is the `en` label
+// ("Security"/"Testing"), not the raw backend id.
+import { renderWithI18n as render } from "../../i18n/test-utils";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -47,8 +51,11 @@ describe("ProgressView", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toMatch(/\/analyses\/job-1$/);
-    expect(screen.getByText("security: running")).toBeInTheDocument();
-    expect(screen.getByText("testing: pending")).toBeInTheDocument();
+    // Localized `"{category}: {status}"` composed as one element's direct
+    // text (getByText joins only direct text-node children). `en` labels:
+    // "security" -> "Security", "testing" -> "Testing".
+    expect(screen.getByText("Security: running")).toBeInTheDocument();
+    expect(screen.getByText("Testing: pending")).toBeInTheDocument();
   });
 
   it("keeps polling at the server-provided pollAfterMs and calls onTerminal on a terminal status", async () => {

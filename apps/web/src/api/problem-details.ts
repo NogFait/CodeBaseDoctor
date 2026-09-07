@@ -1,3 +1,5 @@
+import type { TFunction } from "../i18n";
+
 /**
  * RFC 9457 `application/problem+json` body, as returned by `apps/api`'s
  * `ProblemDetailsFilter` (see apps/api/src/errors/problem-details.ts). Only
@@ -12,36 +14,46 @@ export interface ProblemDetails {
 }
 
 /**
- * Pure mapper from a problem+json body to a user-facing message. No
- * network/DOM access — trivially unit-testable, and reused by every
- * fetch-calling component (UrlEntryForm, RescanButton) as the single source
- * of truth for error copy instead of each duplicating a switch.
+ * Pure mapper from a problem+json body to a user-facing, localized message.
+ * No network/DOM access — trivially unit-testable, and reused by every
+ * fetch-calling component (UrlEntryForm, RescanButton via
+ * `use-submit-analysis`; ProgressView/ReportView on a poll-time failure) as
+ * the single source of truth for error copy instead of each duplicating a
+ * switch.
+ *
+ * Takes the translator as an argument rather than being a hook — its
+ * callers already hold a `useT()` `t` and some (the submit hook) are
+ * themselves not components.
  */
-export function formatProblemMessage(problem: ProblemDetails): string {
+export function formatProblemMessage(problem: ProblemDetails, t: TFunction): string {
   switch (problem.type) {
     case "/errors/invalid-repo-url": {
       const repoUrl = typeof problem.repoUrl === "string" ? problem.repoUrl : undefined;
-      return `That doesn't look like a valid GitHub repo URL${repoUrl ? `: "${repoUrl}"` : ""}.`;
+      return repoUrl
+        ? t("problem.invalidRepoUrlNamed", { repoUrl })
+        : t("problem.invalidRepoUrl");
     }
     case "/errors/repo-not-accessible":
       return problem.reason === "private"
-        ? "This repo is private or we don't have access to it."
-        : "We couldn't find that repo.";
+        ? t("problem.repoNotAccessiblePrivate")
+        : t("problem.repoNotAccessibleNotFound");
     case "/errors/repo-too-large":
-      return "This repo is too large to analyze right now.";
+      return t("problem.repoTooLarge");
     case "/errors/quota-exceeded": {
       const remaining = typeof problem.remaining === "number" ? problem.remaining : 0;
-      return `Daily analysis quota exceeded (${remaining} remaining). Try again later.`;
+      return t("problem.quotaExceeded", { remaining });
     }
     case "/errors/scan-timeout":
-      return "The scan timed out. Please try again.";
+      return t("problem.scanTimeout");
     case "/errors/rate-limited":
       // Distinct from /errors/quota-exceeded's message on purpose — this is
       // the new head-call rate limiter (Fix C), a different concept from
       // the daily analysis quota: "you're submitting too fast", not "you're
       // out of free analyses for today".
-      return "Too many attempts too quickly. Please wait a bit and try again.";
+      return t("problem.rateLimited");
     default:
-      return problem.title;
+      // Prefer the server's own specific title; only fall back to generic
+      // copy if it somehow arrived empty.
+      return problem.title || t("problem.unknown");
   }
 }

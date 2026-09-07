@@ -1,6 +1,7 @@
 import { RescanButton } from "../rescan/RescanButton";
 import { confidenceBadgeLabel } from "./confidence-badge";
 import { formatProblemMessage, type ProblemDetails } from "../../api/problem-details";
+import { useT } from "../../i18n";
 import type { RepoScan, SubmitAnalysisResponse } from "../../api/types";
 
 export interface ReportViewProps {
@@ -23,24 +24,30 @@ const startOverClass =
 /** Task 7.3 — report view. Renders distinctly for all 3 terminal states
  * (report-ui spec): `completed` (6 scored cards), `completed_partial`
  * (scored cards + a retry affordance on the unscored one), and `failed`
- * (no `result` — failure message + explicit quota-refund notice). */
+ * (no `result` — failure message + explicit quota-refund notice).
+ *
+ * Note: category names (`categoryScore.category`) and the analyzer
+ * `rationale` text are rendered verbatim as the backend produced them and
+ * are deliberately not localized (i18n scope: UI chrome only). */
 export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem, onStartOver }: ReportViewProps) {
+  const t = useT();
+
   if (status === "failed" || !result) {
     return (
       <section
-        aria-label="Scan failed"
+        aria-label={t("report.ariaLabelFailed")}
         className="rounded-xl border border-red-200 bg-red-50 p-6 shadow-sm sm:p-8"
       >
-        <h2 className="text-lg font-semibold text-red-800">Scan failed</h2>
-        {problem && <p className="mt-2 text-sm font-medium text-red-800">{formatProblemMessage(problem)}</p>}
-        <p className="mt-2 text-sm text-red-700">
-          We couldn't complete this scan. Your quota was refunded — it doesn't count against your daily limit.
-        </p>
+        <h2 className="text-lg font-semibold text-red-800">{t("report.failedHeading")}</h2>
+        {problem && (
+          <p className="mt-2 text-sm font-medium text-red-800">{formatProblemMessage(problem, t)}</p>
+        )}
+        <p className="mt-2 text-sm text-red-700">{t("report.failedBody")}</p>
         <div className="mt-5 flex flex-wrap items-center gap-4">
-          <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label="Try again" />
+          <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label={t("report.tryAgain")} />
           {onStartOver && (
             <button type="button" onClick={onStartOver} className={startOverClass}>
-              Analyze another repo
+              {t("report.analyzeAnother")}
             </button>
           )}
         </div>
@@ -49,18 +56,18 @@ export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem
   }
 
   return (
-    <section aria-label="Scan report" className="space-y-6">
+    <section aria-label={t("report.ariaLabelReport")} className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          {status === "completed_partial" ? "Partial report" : "Report"}
+          {status === "completed_partial" ? t("report.headingPartial") : t("report.heading")}
         </h2>
-        <p className="mt-1 text-xs text-slate-400">Composite score</p>
+        <p className="mt-1 text-xs text-slate-400">{t("report.compositeScore")}</p>
         <p className="mt-1 text-6xl font-bold tracking-tight text-slate-900">
           {result.compositeScore ?? "N/A"}
         </p>
         {status === "completed_partial" && (
           <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Some categories could not be scored.
+            {t("report.partialNotice")}
           </p>
         )}
       </div>
@@ -77,14 +84,14 @@ export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem
                 <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{categoryScore.score}</p>
                 <p className="mt-2 text-sm text-slate-600">{categoryScore.rationale}</p>
                 <span className="mt-3 inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                  {confidenceBadgeLabel(categoryScore)}
+                  {confidenceBadgeLabel(categoryScore, t)}
                 </span>
               </>
             ) : (
               <>
-                <p className="mt-2 text-sm font-medium text-amber-700">Could not be scored</p>
+                <p className="mt-2 text-sm font-medium text-amber-700">{t("report.categoryUnscored")}</p>
                 <div className="mt-3">
-                  <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label="Retry" />
+                  <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label={t("report.retry")} />
                 </div>
               </>
             )}
@@ -93,10 +100,10 @@ export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem
       </ul>
 
       <div className="flex flex-wrap items-center gap-4">
-        <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label="Re-scan" />
+        <RescanButton repoUrl={repoUrl} onSubmitted={onRescanSubmitted} label={t("report.rescan")} />
         {onStartOver && (
           <button type="button" onClick={onStartOver} className={startOverClass}>
-            Analyze another repo
+            {t("report.analyzeAnother")}
           </button>
         )}
       </div>

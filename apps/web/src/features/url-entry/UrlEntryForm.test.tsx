@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UrlEntryForm } from "./UrlEntryForm";
+// Wraps in <I18nProvider> forced to `en` — English assertions unchanged.
+import { renderWithI18n as render } from "../../i18n/test-utils";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

@@ -1,7 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getAnalysisStatus } from "../../api/client";
+import { useT, type MessageKey, type TFunction } from "../../i18n";
 import type { ProblemDetails } from "../../api/problem-details";
 import type { AnalysisProgressCategory, TerminalAnalysisStatusResponse } from "../../api/types";
+
+const CATEGORY_KEYS: Record<string, MessageKey> = {
+  architecture: "category.architecture",
+  security: "category.security",
+  testing: "category.testing",
+  maintainability: "category.maintainability",
+  performance: "category.performance",
+  documentation: "category.documentation",
+};
+
+const STATUS_KEYS: Record<string, MessageKey> = {
+  pending: "progress.status.pending",
+  running: "progress.status.running",
+  scored: "progress.status.scored",
+  failed: "progress.status.failed",
+  skipped: "progress.status.skipped",
+};
+
+/** Localize a known category id / progress status word, falling back to the
+ * raw backend value for anything unmapped so the row never shows a bare key. */
+function labelFor(t: TFunction, table: Record<string, MessageKey>, value: string): string {
+  const key = table[value];
+  return key ? t(key) : value;
+}
 
 /** Built for any poll rejection — an `ApiError` (any non-2xx problem+json,
  * including the 504 scan-timeout terminal case) or a raw network failure
@@ -36,6 +61,7 @@ interface ProgressState {
  * not a fixed client-side interval) until a terminal status, rendering
  * per-category state as it changes. */
 export function ProgressView({ jobId, pollAfterMs, onTerminal }: ProgressViewProps) {
+  const t = useT();
   const [progress, setProgress] = useState<ProgressState | null>(null);
   // Keeps the effect's poll loop from needing `onTerminal` in its dep array
   // — a new callback identity on every parent render must NOT restart the
@@ -84,7 +110,7 @@ export function ProgressView({ jobId, pollAfterMs, onTerminal }: ProgressViewPro
 
   return (
     <section
-      aria-label="Scan progress"
+      aria-label={t("progress.ariaLabel")}
       className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
     >
       <h2 className="flex items-center gap-2.5 text-lg font-semibold text-slate-900">
@@ -92,7 +118,7 @@ export function ProgressView({ jobId, pollAfterMs, onTerminal }: ProgressViewPro
           aria-hidden="true"
           className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500"
         />
-        Scanning repository…
+        {t("progress.heading")}
       </h2>
       {progress ? (
         <ul className="mt-5 divide-y divide-slate-100 border-t border-slate-100">
@@ -101,12 +127,15 @@ export function ProgressView({ jobId, pollAfterMs, onTerminal }: ProgressViewPro
               key={category.category}
               className="py-2.5 font-mono text-sm text-slate-600"
             >
-              {category.category}: {category.status}
+              {/* Keep name + status as direct text of this single <li> — a
+                  `getByText("security: running")`-style query only joins an
+                  element's direct text-node children, not nested spans. */}
+              {labelFor(t, CATEGORY_KEYS, category.category)}: {labelFor(t, STATUS_KEYS, category.status)}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-4 animate-pulse text-sm text-slate-500">Starting scan…</p>
+        <p className="mt-4 animate-pulse text-sm text-slate-500">{t("progress.starting")}</p>
       )}
     </section>
   );

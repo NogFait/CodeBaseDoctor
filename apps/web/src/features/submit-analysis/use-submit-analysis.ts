@@ -1,11 +1,8 @@
 import { useState } from "react";
 import { ApiError, submitAnalysis } from "../../api/client";
 import { formatProblemMessage } from "../../api/problem-details";
+import { useT } from "../../i18n";
 import type { SubmitAnalysisResponse } from "../../api/types";
-
-/** Generic "we couldn't map this to a known problem type" copy — shown for a
- * raw network failure or any non-`ApiError` throw. */
-const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 export interface UseSubmitAnalysis {
   /** Fire a `POST /analyses`. On success calls `onSubmitted(repoUrl,
@@ -28,6 +25,7 @@ export interface UseSubmitAnalysis {
 export function useSubmitAnalysis(
   onSubmitted: (repoUrl: string, response: SubmitAnalysisResponse) => void,
 ): UseSubmitAnalysis {
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -38,7 +36,7 @@ export function useSubmitAnalysis(
       const response = await submitAnalysis(repoUrl, options);
       onSubmitted(repoUrl, response);
     } catch (err) {
-      setError(err instanceof ApiError ? formatProblemMessage(err.problem) : GENERIC_ERROR);
+      setError(err instanceof ApiError ? formatProblemMessage(err.problem, t) : t("error.generic"));
     } finally {
       setPending(false);
     }
