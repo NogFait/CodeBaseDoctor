@@ -86,6 +86,29 @@ describe("SecurityAnalyzer", () => {
     expect(result.score).toBe(0);
   });
 
+  it("emits a structured rationale key + params for the frontend (singular: 1 finding)", async () => {
+    const reader = new MockScanOutputReader({ findings: [findingOf({ severity: "low" })] });
+    const analyzer = new SecurityAnalyzer(reader);
+
+    const result = await analyzer.analyze(fakeCtx(), new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.security");
+    expect(result.rationaleParams).toEqual({ n: 1 });
+    // canonical English string stays byte-identical
+    expect(result.rationale).toBe("1 finding from Semgrep + OSV-Scanner.");
+  });
+
+  it("emits a structured rationale key + params for the frontend (plural: 0 findings)", async () => {
+    const reader = new MockScanOutputReader({ findings: [] });
+    const analyzer = new SecurityAnalyzer(reader);
+
+    const result = await analyzer.analyze(fakeCtx(), new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.security");
+    expect(result.rationaleParams).toEqual({ n: 0 });
+    expect(result.rationale).toBe("0 findings from Semgrep + OSV-Scanner.");
+  });
+
   it("makes zero network calls of its own — everything comes through the injected reader seam", async () => {
     // Real assertion, not a tautology: the ONLY way this analyzer could
     // reach a scanner is through `reader`, and we've replaced `reader`

@@ -56,6 +56,41 @@ describe("MaintainabilityAnalyzer", () => {
     expect(result.rationale).toContain("2 oversized file");
   });
 
+  it("emits a structured rationale key + params (plural oversized)", async () => {
+    const ctx = ctxWithFiles([
+      { path: "a.ts", sizeBytes: 20_000, loc: 500, language: "TypeScript" },
+      { path: "b.ts", sizeBytes: 20_000, loc: 600, language: "TypeScript" },
+      { path: "c.ts", sizeBytes: 200, loc: 10, language: "TypeScript" },
+    ]);
+    const analyzer = new MaintainabilityAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.maintainability");
+    expect(result.rationaleParams).toEqual({ oversized: 2, loc: 300, recognized: 3 });
+    // canonical English string stays byte-identical
+    expect(result.rationale).toBe(
+      "2 oversized files (>300 LOC) out of 3 recognized-language files.",
+    );
+  });
+
+  it("emits a structured rationale key + params (singular oversized)", async () => {
+    const ctx = ctxWithFiles([
+      { path: "a.ts", sizeBytes: 20_000, loc: 500, language: "TypeScript" },
+      { path: "b.ts", sizeBytes: 200, loc: 10, language: "TypeScript" },
+      { path: "c.ts", sizeBytes: 200, loc: 10, language: "TypeScript" },
+    ]);
+    const analyzer = new MaintainabilityAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.maintainability");
+    expect(result.rationaleParams).toEqual({ oversized: 1, loc: 300, recognized: 3 });
+    expect(result.rationale).toBe(
+      "1 oversized file (>300 LOC) out of 3 recognized-language files.",
+    );
+  });
+
   it("a repo with zero recognized-language files scores a defined, non-crashing result", async () => {
     const ctx = ctxWithFiles([{ path: "README.md", sizeBytes: 100, loc: 5, language: null }]);
     const analyzer = new MaintainabilityAnalyzer();

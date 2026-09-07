@@ -65,6 +65,13 @@ export interface CategoryScore {
   weightCap: number;
   /** Always populated, even on failure. */
   rationale: string;
+  /** Stable i18n key for the rationale, when the analyzer produces a
+   * templated (non-LLM) rationale. The frontend renders t(rationaleKey,
+   * rationaleParams); `rationale` remains the canonical English text and the
+   * fallback for consumers without the message catalog (and for LLM
+   * categories). */
+  rationaleKey?: string;
+  rationaleParams?: Record<string, string | number | boolean>;
   findings: readonly Finding[];
   error?: { code: string; message: string };
   durationMs: number;

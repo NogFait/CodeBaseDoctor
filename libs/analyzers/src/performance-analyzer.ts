@@ -94,6 +94,8 @@ export class PerformanceAnalyzer implements CategoryAnalyzer {
       confidence: this.confidence,
       weightCap: PERFORMANCE_WEIGHT_CAP,
       rationale: `Static heuristic scan over ${candidates.length} file(s); ${findings.length} pattern match(es) found. Weak signal — see weightCap.`,
+      rationaleKey: "rationale.performance",
+      rationaleParams: { files: candidates.length, matches: findings.length },
       findings,
       durationMs: Date.now() - startedAt,
     };

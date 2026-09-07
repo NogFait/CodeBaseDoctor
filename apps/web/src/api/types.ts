@@ -37,6 +37,12 @@ export interface CategoryScore {
   /** 1.0 for all categories except Performance (0.5, reduced weight). */
   weightCap: number;
   rationale: string;
+  /** Stable i18n key for a templated (non-LLM) rationale. When present the
+   * UI renders `rationaleText(t, categoryScore)` in the active locale;
+   * `rationale` stays the canonical English text and the fallback (LLM
+   * categories never set this). Mirrors `@cbd/analysis`'s `CategoryScore`. */
+  rationaleKey?: string;
+  rationaleParams?: Record<string, string | number | boolean>;
   findings: readonly Finding[];
   error?: { code: string; message: string };
   durationMs: number;

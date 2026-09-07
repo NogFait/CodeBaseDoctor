@@ -49,6 +49,27 @@ export const es = {
   "report.retry": "Reintentar",
   "report.analyzeAnother": "Analizar otro repo",
 
+  // features/report/ReportView.tsx — structured analyzer rationales.
+  // The 4 deterministic analyzers emit a stable `rationaleKey` + raw params;
+  // `apps/web/src/i18n/rationale.ts` picks the .one/.other plural form and
+  // composes the multi-clause ones. `en.ts` reproduces the analyzers'
+  // canonical English byte-for-byte (see that file's assertions).
+  "rationale.security.one": "{n} hallazgo de Semgrep + OSV-Scanner.",
+  "rationale.security.other": "{n} hallazgos de Semgrep + OSV-Scanner.",
+  "rationale.testing.count.one": "{n} archivo de test detectado por convención de nombres",
+  "rationale.testing.count.other": "{n} archivos de test detectados por convención de nombres",
+  "rationale.testing.ci": "hay configuración de CI",
+  "rationale.testing.noCi": "no se encontró configuración de CI",
+  "rationale.maintainability.one":
+    "{oversized} archivo de gran tamaño (>{loc} LOC) de {recognized} archivos de lenguaje reconocido.",
+  "rationale.maintainability.other":
+    "{oversized} archivos de gran tamaño (>{loc} LOC) de {recognized} archivos de lenguaje reconocido.",
+  "rationale.performance.files.one": "Escaneo heurístico estático sobre {files} archivo",
+  "rationale.performance.files.other": "Escaneo heurístico estático sobre {files} archivos",
+  "rationale.performance.matches.one": "se encontró {matches} coincidencia de patrón",
+  "rationale.performance.matches.other": "se encontraron {matches} coincidencias de patrón",
+  "rationale.performance.suffix": "Señal débil — ver weightCap.",
+
   // features/report/confidence-badge.ts
   "confidence.lowStatic": "Confianza baja — estimación estática",
   "confidence.measured": "Medido",

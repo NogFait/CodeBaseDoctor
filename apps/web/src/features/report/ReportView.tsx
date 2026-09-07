@@ -2,6 +2,7 @@ import { RescanButton } from "../rescan/RescanButton";
 import { confidenceBadgeLabel } from "./confidence-badge";
 import { formatProblemMessage, type ProblemDetails } from "../../api/problem-details";
 import { useT, CATEGORY_KEYS, labelFor } from "../../i18n";
+import { rationaleText } from "../../i18n/rationale";
 import type { RepoScan, SubmitAnalysisResponse } from "../../api/types";
 
 export interface ReportViewProps {
@@ -26,9 +27,12 @@ const startOverClass =
  * (scored cards + a retry affordance on the unscored one), and `failed`
  * (no `result` — failure message + explicit quota-refund notice).
  *
- * Note: category display names are localized (`CATEGORY_KEYS`), but the
- * analyzer `rationale` text is rendered verbatim as the backend produced it
- * (i18n scope: UI chrome only — rationales come from the analyzers / LLM). */
+ * Note: category display names are localized (`CATEGORY_KEYS`). Rationale
+ * text is localized ONLY for the 4 deterministic analyzers, which emit a
+ * structured `rationaleKey` + `rationaleParams` — `rationaleText` renders
+ * those in the active locale. LLM categories (architecture, documentation)
+ * carry no key and their `rationale` is rendered verbatim as the model
+ * produced it. */
 export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem, onStartOver }: ReportViewProps) {
   const t = useT();
 
@@ -82,7 +86,7 @@ export function ReportView({ repoUrl, status, result, onRescanSubmitted, problem
             {categoryScore.status === "scored" ? (
               <>
                 <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{categoryScore.score}</p>
-                <p className="mt-2 text-sm text-slate-600">{categoryScore.rationale}</p>
+                <p className="mt-2 text-sm text-slate-600">{rationaleText(t, categoryScore)}</p>
                 <span className="mt-3 inline-block rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
                   {confidenceBadgeLabel(categoryScore, t)}
                 </span>

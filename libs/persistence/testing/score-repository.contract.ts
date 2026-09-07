@@ -64,6 +64,31 @@ export function describeScoreRepositoryContract(makeRepo: () => ScoreRepositoryP
         expect(found).toBeNull();
       });
 
+      it("round-trips a category's structured rationale fields (rationaleKey / rationaleParams)", async () => {
+        // The 4 deterministic analyzers attach a stable i18n key + raw params
+        // to their CategoryScore so the frontend can localize the rationale.
+        // categories is a Prisma `Json` column — these optional fields must
+        // survive save -> findById AND save -> findCached (cache hit) with no
+        // schema/migration change.
+        const scored = makeCategoryScore({
+          rationaleKey: "rationale.testing",
+          rationaleParams: { n: 3, ci: true },
+        });
+        const saved = await repo.save(makeReport({ status: "complete", categories: [scored] }));
+
+        const byId = await repo.findById(saved.id);
+        expect(byId?.categories[0].rationaleKey).toBe("rationale.testing");
+        expect(byId?.categories[0].rationaleParams).toEqual({ n: 3, ci: true });
+
+        const cached = await repo.findCached({
+          repoUrl: saved.repoUrl,
+          commitSha: saved.commitSha,
+          engineVersion: saved.engineVersion,
+        });
+        expect(cached?.categories[0].rationaleKey).toBe("rationale.testing");
+        expect(cached?.categories[0].rationaleParams).toEqual({ n: 3, ci: true });
+      });
+
       it("does not mutate a previously saved scan when a later scan is saved (immutability)", async () => {
         const saved = await repo.save(makeReport({ compositeScore: 50 }));
         await repo.save(makeReport({ compositeScore: 90, commitSha: "b".repeat(40) }));

@@ -45,6 +45,8 @@ export class SecurityAnalyzer implements CategoryAnalyzer {
       confidence: this.confidence,
       weightCap: 1,
       rationale: `${findings.length} finding${findings.length === 1 ? "" : "s"} from Semgrep + OSV-Scanner.`,
+      rationaleKey: "rationale.security",
+      rationaleParams: { n: findings.length },
       findings: findings.map(toDomainFinding),
       durationMs: Date.now() - startedAt,
     };

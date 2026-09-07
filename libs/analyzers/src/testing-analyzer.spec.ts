@@ -58,4 +58,38 @@ describe("TestingAnalyzer", () => {
     expect(withCiResult.score).toBeGreaterThan(baseline.score ?? -1);
     expect(withCiResult.rationale).toContain("CI config present");
   });
+
+  it("emits a structured rationale key + params (plural test files, no CI)", async () => {
+    const ctx = await buildFixtureRepoContext(path.join(FIXTURES_ROOT, "no-tests-py"), {
+      repoUrl: "https://github.com/fixture/no-tests-py",
+      commitSha: "d".repeat(40),
+    });
+    const analyzer = new TestingAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.testing");
+    expect(result.rationaleParams).toEqual({ n: 0, ci: false });
+    // canonical English string stays byte-identical
+    expect(result.rationale).toBe("0 test files detected by naming convention; no CI config found.");
+  });
+
+  it("emits a structured rationale key + params (singular test file, CI present)", async () => {
+    const base = await buildFixtureRepoContext(path.join(FIXTURES_ROOT, "well-tested-ts"), {
+      repoUrl: "https://github.com/fixture/well-tested-ts",
+      commitSha: "e".repeat(40),
+    });
+    // well-tested-ts has exactly 1 test file; add a CI workflow to hit ci:true.
+    const ctx = {
+      ...base,
+      files: [...base.files, { path: ".github/workflows/ci.yml", sizeBytes: 40, loc: 4, language: null }],
+    };
+    const analyzer = new TestingAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.testing");
+    expect(result.rationaleParams).toEqual({ n: 1, ci: true });
+    expect(result.rationale).toBe("1 test file detected by naming convention; CI config present.");
+  });
 });

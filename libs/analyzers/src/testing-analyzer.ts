@@ -50,6 +50,8 @@ export class TestingAnalyzer implements CategoryAnalyzer {
       rationale: `${testFileCount} test file${testFileCount === 1 ? "" : "s"} detected by naming convention; ${
         hasCi ? "CI config present" : "no CI config found"
       }.`,
+      rationaleKey: "rationale.testing",
+      rationaleParams: { n: testFileCount, ci: hasCi },
       findings: [],
       durationMs: Date.now() - startedAt,
     };

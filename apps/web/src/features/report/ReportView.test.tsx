@@ -206,7 +206,88 @@ describe("ReportView — localized category names", () => {
     for (const name of ["Arquitectura", "Seguridad", "Testing", "Mantenibilidad", "Rendimiento", "Documentación"]) {
       expect(screen.getByRole("heading", { name })).toBeInTheDocument();
     }
-    // rationale text stays verbatim from the backend (i18n scope: chrome only)
+    // a category WITHOUT a structured rationaleKey (LLM categories) still
+    // renders its raw rationale verbatim
     expect(screen.getByText("No critical findings.")).toBeInTheDocument();
+  });
+});
+
+describe("ReportView — structured (localized) rationale", () => {
+  function scanWithSecurityRationale(params: Record<string, string | number | boolean>): RepoScan {
+    return scan({
+      categories: [
+        category({ category: "architecture", confidence: "judged", rationale: "Clean layering." }),
+        category({
+          category: "security",
+          confidence: "measured",
+          rationale: "4 findings from Semgrep + OSV-Scanner.",
+          rationaleKey: "rationale.security",
+          rationaleParams: params,
+        }),
+        category({ category: "testing", confidence: "estimated", rationale: "Good coverage heuristics." }),
+        category({ category: "maintainability", confidence: "measured", rationale: "Low complexity." }),
+        category({ category: "performance", confidence: "estimated", weightCap: 0.5, rationale: "Static estimate only." }),
+        category({ category: "documentation", confidence: "judged", rationale: "README present." }),
+      ],
+    });
+  }
+
+  it("renders the security rationale in Spanish from rationaleKey/params (plural)", () => {
+    render(
+      <ReportView
+        repoUrl="https://github.com/owner/repo"
+        status="completed"
+        result={scanWithSecurityRationale({ n: 4 })}
+        onRescanSubmitted={vi.fn()}
+      />,
+      { locale: "es" },
+    );
+
+    const securityCard = screen.getByRole("heading", { name: /seguridad/i }).closest("li")!;
+    expect(within(securityCard).getByText("4 hallazgos de Semgrep + OSV-Scanner.")).toBeInTheDocument();
+    // the raw English canonical string must NOT leak through
+    expect(within(securityCard).queryByText("4 findings from Semgrep + OSV-Scanner.")).not.toBeInTheDocument();
+  });
+
+  it("renders the singular Spanish form when n === 1", () => {
+    render(
+      <ReportView
+        repoUrl="https://github.com/owner/repo"
+        status="completed"
+        result={scanWithSecurityRationale({ n: 1 })}
+        onRescanSubmitted={vi.fn()}
+      />,
+      { locale: "es" },
+    );
+
+    const securityCard = screen.getByRole("heading", { name: /seguridad/i }).closest("li")!;
+    expect(within(securityCard).getByText("1 hallazgo de Semgrep + OSV-Scanner.")).toBeInTheDocument();
+  });
+
+  it("still renders a category WITHOUT rationaleKey (architecture/LLM) verbatim in both locales", () => {
+    const { unmount } = render(
+      <ReportView
+        repoUrl="https://github.com/owner/repo"
+        status="completed"
+        result={scanWithSecurityRationale({ n: 4 })}
+        onRescanSubmitted={vi.fn()}
+      />,
+      { locale: "es" },
+    );
+    const archEs = screen.getByRole("heading", { name: /arquitectura/i }).closest("li")!;
+    expect(within(archEs).getByText("Clean layering.")).toBeInTheDocument();
+    unmount();
+
+    render(
+      <ReportView
+        repoUrl="https://github.com/owner/repo"
+        status="completed"
+        result={scanWithSecurityRationale({ n: 4 })}
+        onRescanSubmitted={vi.fn()}
+      />,
+      { locale: "en" },
+    );
+    const archEn = screen.getByRole("heading", { name: /architecture/i }).closest("li")!;
+    expect(within(archEn).getByText("Clean layering.")).toBeInTheDocument();
   });
 });

@@ -40,6 +40,8 @@ export class MaintainabilityAnalyzer implements CategoryAnalyzer {
       confidence: this.confidence,
       weightCap: 1,
       rationale: `${oversizedCount} oversized file${oversizedCount === 1 ? "" : "s"} (>${OVERSIZED_FILE_LOC} LOC) out of ${recognizedCount} recognized-language file${recognizedCount === 1 ? "" : "s"}.`,
+      rationaleKey: "rationale.maintainability",
+      rationaleParams: { oversized: oversizedCount, loc: OVERSIZED_FILE_LOC, recognized: recognizedCount },
       findings: [],
       durationMs: Date.now() - startedAt,
     };

@@ -54,6 +54,33 @@ describe("PerformanceAnalyzer", () => {
     expect(flaggedResult.rationale).toContain("Static heuristic");
   });
 
+  it("emits a structured rationale key + params (singular file, zero matches)", async () => {
+    const ctx = ctxWithSources({ "src/index.ts": "export const x = 1;\n" });
+    const analyzer = new PerformanceAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.performance");
+    expect(result.rationaleParams).toEqual({ files: 1, matches: 0 });
+    // canonical English string is unchanged (still lazy "file(s)" / "match(es)")
+    expect(result.rationale).toBe(
+      "Static heuristic scan over 1 file(s); 0 pattern match(es) found. Weak signal — see weightCap.",
+    );
+  });
+
+  it("emits a structured rationale key + params (plural files and matches)", async () => {
+    const ctx = ctxWithSources({
+      "src/a.ts": "const data = fs.readFileSync('x');\n",
+      "src/b.ts": "for (const a of items) {\n  for (const b of items) {\n    check(a, b);\n  }\n}\n",
+    });
+    const analyzer = new PerformanceAnalyzer();
+
+    const result = await analyzer.analyze(ctx, new AbortController().signal);
+
+    expect(result.rationaleKey).toBe("rationale.performance");
+    expect(result.rationaleParams).toEqual({ files: 2, matches: 2 });
+  });
+
   it("flags a naive nested loop pattern", async () => {
     const withNestedLoop = ctxWithSources({
       "src/b.ts": "for (const a of items) {\n  for (const b of items) {\n    check(a, b);\n  }\n}\n",

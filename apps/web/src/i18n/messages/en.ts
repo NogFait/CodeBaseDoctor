@@ -40,6 +40,25 @@ export const en: Messages = {
   "report.retry": "Retry",
   "report.analyzeAnother": "Analyze another repo",
 
+  // Structured analyzer rationales — MUST reproduce the analyzers' canonical
+  // English exactly once rendered with params (existing analyzer/E2E specs
+  // assert substrings of the raw string). See apps/web/src/i18n/rationale.ts.
+  "rationale.security.one": "{n} finding from Semgrep + OSV-Scanner.",
+  "rationale.security.other": "{n} findings from Semgrep + OSV-Scanner.",
+  "rationale.testing.count.one": "{n} test file detected by naming convention",
+  "rationale.testing.count.other": "{n} test files detected by naming convention",
+  "rationale.testing.ci": "CI config present",
+  "rationale.testing.noCi": "no CI config found",
+  "rationale.maintainability.one":
+    "{oversized} oversized file (>{loc} LOC) out of {recognized} recognized-language files.",
+  "rationale.maintainability.other":
+    "{oversized} oversized files (>{loc} LOC) out of {recognized} recognized-language files.",
+  "rationale.performance.files.one": "Static heuristic scan over {files} file",
+  "rationale.performance.files.other": "Static heuristic scan over {files} files",
+  "rationale.performance.matches.one": "{matches} pattern match found",
+  "rationale.performance.matches.other": "{matches} pattern matches found",
+  "rationale.performance.suffix": "Weak signal — see weightCap.",
+
   "confidence.lowStatic": "Low confidence — static estimate",
   "confidence.measured": "Measured",
   "confidence.estimated": "Estimated",
