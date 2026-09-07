@@ -1,6 +1,27 @@
-# CodeBase Doctor IA
+<p align="center">
+  <img src="docs/img/logo.png" alt="CodeBase Doctor IA" width="150">
+</p>
 
-**Pasale la URL de un repositorio público de GitHub. Te devuelve un puntaje de 0 a 100 en seis dimensiones de ingeniería — cada una con una explicación escrita y una etiqueta de confianza.**
+<h1 align="center">CodeBase Doctor IA</h1>
+
+<p align="center">
+  <strong>Pasale la URL de un repositorio público de GitHub.<br>
+  Te devuelve un puntaje de 0 a 100 en seis dimensiones de ingeniería — cada una con una explicación escrita y una etiqueta de confianza.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/NestJS-E0234E?style=flat-square&logo=nestjs&logoColor=white" alt="NestJS">
+  <img src="https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB" alt="React">
+  <img src="https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite">
+  <img src="https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/Prisma-2D3748?style=flat-square&logo=prisma&logoColor=white" alt="Prisma">
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/Redis-FF4438?style=flat-square&logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=white" alt="Vitest">
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/pnpm-F69220?style=flat-square&logo=pnpm&logoColor=white" alt="pnpm">
+</p>
 
 ![CodeBase Doctor IA — Analiza · Diagnostica · Mejora](docs/img/hero.png)
 
@@ -134,6 +155,21 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 
 ---
 
+## Stack
+
+| Capa | Tecnologías |
+| --- | --- |
+| **Lenguaje / runtime** | TypeScript · Node.js ≥ 20.6 |
+| **Backend** | NestJS 11 — dos procesos (HTTP + worker headless) · BullMQ sobre Redis |
+| **Frontend** | React 19 · Vite 8 · Tailwind CSS 4 · i18n hecho a mano (es/en) |
+| **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
+| **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
+| **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 403 tests / 67 archivos |
+| **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
+
+---
+
 ## Estructura del repositorio
 
 ```
@@ -209,7 +245,7 @@ Para usar el juez LLM **real**, dejá `LLM_JUDGE` sin setear (o poné `LLM_JUDGE
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 62 archivos de test / 353 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 67 archivos de test / 403 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```
@@ -285,11 +321,11 @@ Base URL en desarrollo local: `http://localhost:3000`.
 
 ## Estado / roadmap
 
-**MVP completo** — Fases 1–8: dominio y ports, los seis adaptadores de analizador, ingesta con sandbox de Docker, persistencia Prisma/Redis, la API HTTP con errores RFC 9457, el pipeline del worker con el watchdog de jobs colgados, la SPA de React, y la suite E2E sobre Postgres/Redis/Semgrep/OSV reales.
+**MVP completo** — Fases 1–8: dominio y ports, los seis adaptadores de analizador, ingesta con sandbox de Docker, persistencia Prisma/Redis, la API HTTP con errores RFC 9457, el pipeline del worker con el watchdog de jobs colgados, la SPA de React, y la suite E2E sobre Postgres/Redis/Semgrep/OSV reales. Más: selector de idioma **ES / EN** (i18n de la UI + rationales de los analizadores deterministas), branding y guía de desarrollo local con juez LLM stub sin costo.
 
 **Roadmap** (corto y honesto):
 
-- **Selector de idioma i18n (ES / EN)** — en desarrollo; los strings de la UI hoy son sólo inglés.
+- Rationales de Architecture / Documentation en el idioma seleccionado — hoy los genera el juez LLM en inglés; requiere pasarle el locale al prompt.
 - Validación de URL del lado del cliente antes de enviar (hoy el primer feedback ante una URL inválida es el round-trip del `400`).
 - Constantes de rate-limit / cuota ajustadas — los valores de límite y ventana son una política fija horneada en los adaptadores.
 - Un escenario E2E dedicado para scan-timeout (el camino del `504` tiene cobertura unit pero todavía no end-to-end).
