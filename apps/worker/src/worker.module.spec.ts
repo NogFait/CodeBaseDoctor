@@ -2,7 +2,14 @@ import "reflect-metadata";
 import { Module } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import { Test } from "@nestjs/testing";
-import { RepoAnalysisService, REPO_SOURCE_PORT, SCORE_REPOSITORY_PORT, USAGE_QUOTA_PORT, CATEGORY_ANALYZERS } from "@cbd/analysis";
+import {
+  RepoAnalysisService,
+  HEAD_CALL_RATE_LIMITER_PORT,
+  REPO_SOURCE_PORT,
+  SCORE_REPOSITORY_PORT,
+  USAGE_QUOTA_PORT,
+  CATEGORY_ANALYZERS,
+} from "@cbd/analysis";
 import { ShallowCloneAdapter } from "@cbd/repo-source";
 import { PrismaScoreRepository, DailyFreeTierAdapter } from "@cbd/persistence";
 import { JobsConsumerModule } from "@cbd/jobs";
@@ -24,7 +31,12 @@ import { WorkerModule } from "./worker.module";
  * Docker socket, AnthropicJudgeAdapter's SDK client, and PrismaService's
  * $connect() are all lazy / gated behind lifecycle hooks Nest doesn't run
  * on a bare `.compile()`), so this needs no real Docker/Postgres/Anthropic
- * credentials.
+ * credentials — EXCEPT HEAD_CALL_RATE_LIMITER_PORT (Fix C), whose real
+ * PersistenceModule binding constructs a real ioredis client eagerly at
+ * construction time (confirmed via a genuine
+ * `[ioredis] Unhandled error event: ECONNREFUSED` the moment it was wired
+ * for real here) — overridden below for the same reason
+ * JobsConsumerModule is.
  *
  * `JobsConsumerModule` is swapped for a fake via `.overrideModule()` — same
  * pattern and same reason as `apps/api/src/api.module.spec.ts`'s
@@ -47,6 +59,8 @@ describe("WorkerModule wiring (Task A: AnalysisDomainModule DI gap)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [WorkerModule] })
       .overrideModule(JobsConsumerModule)
       .useModule(FakeJobsConsumerModule)
+      .overrideProvider(HEAD_CALL_RATE_LIMITER_PORT)
+      .useValue({ checkAndRecord: async () => {} })
       .compile();
 
     const service = moduleRef.get(RepoAnalysisService);

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Prisma } from "@prisma/client";
-import { AnalysisJobRepository, type CreateAnalysisJobInput } from "./analysis-job-repository";
+import { AnalysisJobRepository, STALE_JOB_SWEEP_BATCH_SIZE, type CreateAnalysisJobInput } from "./analysis-job-repository";
 import { startTestDatabase, type TestDatabase } from "../testing/postgres-test-db";
 
 // Real Testcontainers Postgres — same pattern as prisma-score-repository /
@@ -91,6 +91,16 @@ describe("AnalysisJobRepository (Testcontainers Postgres)", () => {
     expect(after?.status).toBe("resolving");
     expect(after?.startedAt).toBeInstanceOf(Date);
     expect(after?.finishedAt).toBeNull();
+  });
+
+  // Characterization test for the SELECT+UPDATE -> single-transaction
+  // refactor: the collapse must keep updateStatus()'s original
+  // findUniqueOrThrow() contract that an unknown id is a hard error, not a
+  // silent no-op (AnalysisProcessor relies on "on ANY thrown error" from
+  // this write). RED if the leading write is a bare updateMany().
+  it("updateStatus() throws (does not silently no-op) for a well-formed but unknown job id", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    await expect(repo.updateStatus("00000000-0000-0000-0000-000000000000", "analyzing")).rejects.toThrow();
   });
 
   it("updateStatus() does not move startedAt on a later, still-non-terminal transition", async () => {
@@ -255,6 +265,72 @@ describe("AnalysisJobRepository (Testcontainers Postgres)", () => {
     const stale = await repo.findStale(cutoff);
 
     expect(stale.map((s) => s.id)).not.toContain(id);
+  });
+
+  it("findStale() caps its result at STALE_JOB_SWEEP_BATCH_SIZE and returns the oldest-started jobs first", async () => {
+    // verify WARNING 3: sweep() fans out ~2 concurrent pooled DB ops per
+    // returned row, so findStale() must bound its result — otherwise a mass
+    // worker-crash backlog saturates the Prisma pool. Also asserts the
+    // deterministic oldest-first order the partial index supports, so a
+    // large backlog drains predictably across scheduler ticks.
+    const repo = new AnalysisJobRepository(db.prisma);
+    const total = STALE_JOB_SWEEP_BATCH_SIZE + 5;
+    const base = Date.now() - 20 * 60 * 1000;
+
+    const idsOldestFirst: string[] = [];
+    for (let i = 0; i < total; i++) {
+      const { id } = await repo.create(input());
+      await repo.updateStatus(id, "analyzing");
+      // i = 0 gets the largest backdate -> it is the oldest; strictly
+      // increasing startedAt as i grows.
+      await db.prisma.analysisJob.update({
+        where: { id },
+        data: { startedAt: new Date(base - (total - i) * 1000) },
+      });
+      idsOldestFirst.push(id);
+    }
+
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const stale = await repo.findStale(cutoff);
+
+    expect(stale).toHaveLength(STALE_JOB_SWEEP_BATCH_SIZE);
+    expect(stale.map((s) => s.id)).toEqual(idsOldestFirst.slice(0, STALE_JOB_SWEEP_BATCH_SIZE));
+  });
+
+  it("updateStatusIfCurrentlyIn() transitions and returns true when the current status is one of the allowed statuses (CAS success)", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+    await repo.updateStatus(id, "analyzing");
+
+    const transitioned = await repo.updateStatusIfCurrentlyIn(id, ["analyzing", "cloning"], "failed", {
+      errorCode: "JOB_WATCHDOG_TIMEOUT",
+      errorMessage: "stale",
+    });
+
+    expect(transitioned).toBe(true);
+    const record = await repo.findById(id);
+    expect(record?.status).toBe("failed");
+    expect(record?.errorCode).toBe("JOB_WATCHDOG_TIMEOUT");
+    expect(record?.finishedAt).toBeInstanceOf(Date);
+  });
+
+  it("updateStatusIfCurrentlyIn() does NOT transition and returns false when the current status is not one of the allowed statuses (CAS failure — the race the watchdog must not lose)", async () => {
+    const repo = new AnalysisJobRepository(db.prisma);
+    const { id } = await repo.create(input());
+    await repo.updateStatus(id, "analyzing");
+    // Simulate the job having legitimately reached a terminal status already
+    // (e.g. AnalysisProcessor finished it) BEFORE the CAS write is attempted.
+    await repo.updateStatus(id, "completed_partial");
+
+    const transitioned = await repo.updateStatusIfCurrentlyIn(id, ["analyzing", "cloning"], "failed", {
+      errorCode: "JOB_WATCHDOG_TIMEOUT",
+      errorMessage: "stale",
+    });
+
+    expect(transitioned).toBe(false);
+    const record = await repo.findById(id);
+    expect(record?.status).toBe("completed_partial");
+    expect(record?.errorCode).toBeNull();
   });
 
   it("rejects a second job created with an already-used reservationId (unique constraint)", async () => {

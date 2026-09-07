@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
-import { REPO_SOURCE_PORT, SCORE_REPOSITORY_PORT, USAGE_QUOTA_PORT } from "@cbd/analysis";
+import { HEAD_CALL_RATE_LIMITER_PORT, REPO_SOURCE_PORT, SCORE_REPOSITORY_PORT, USAGE_QUOTA_PORT } from "@cbd/analysis";
 import { ShallowCloneAdapter } from "@cbd/repo-source";
 import { PrismaScoreRepository, DailyFreeTierAdapter } from "@cbd/persistence";
 import { JobsProducerModule } from "@cbd/jobs";
@@ -31,6 +31,15 @@ import { SubmitAnalysisUseCase } from "./analyses/submit-analysis.use-case";
  * BullMQ/Redis producer path is covered separately by
  * libs/jobs/src/analysis-queue-producer.integration.spec.ts (real
  * Testcontainers Redis).
+ *
+ * HEAD_CALL_RATE_LIMITER_PORT (Fix C) is overridden for the SAME reason:
+ * PersistenceModule's real binding constructs its own real ioredis client
+ * (RedisHeadCallRateLimiterAdapter) on module compile — a live-Redis
+ * dependency this DI-wiring-only test doesn't need and shouldn't leave a
+ * dangling reconnect-retrying connection behind after `moduleRef.close()`.
+ * The real Redis-backed path is covered separately by
+ * libs/persistence/src/redis-head-call-rate-limiter-adapter.integration.spec.ts
+ * (real Testcontainers Redis).
  */
 @Module({
   providers: [{ provide: AnalysisQueueProducer, useValue: { enqueue: async () => "fake-bull-job-id" } }],
@@ -43,6 +52,8 @@ describe("ApiModule wiring (Task A: apps/api never imports AnalysisDomainModule/
     const moduleRef = await Test.createTestingModule({ imports: [ApiModule] })
       .overrideModule(JobsProducerModule)
       .useModule(FakeJobsProducerModule)
+      .overrideProvider(HEAD_CALL_RATE_LIMITER_PORT)
+      .useValue({ checkAndRecord: async () => {} })
       .compile();
 
     const controller = moduleRef.get(AnalysesController);

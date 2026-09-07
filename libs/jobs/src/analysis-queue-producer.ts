@@ -8,6 +8,13 @@ export interface EnqueueAnalysisPayload {
   repoUrl: string;
   actorId: string;
   reservationId: string;
+  /**
+   * Explicit user "Re-scan". Carried onto the job so the worker's
+   * `RepoAnalysisService.analyze()` skips its OWN cache lookup too —
+   * otherwise a forced re-scan of an unchanged repo just returns the
+   * cached scan and visibly does nothing.
+   */
+  forceRescan?: boolean;
 }
 
 /**

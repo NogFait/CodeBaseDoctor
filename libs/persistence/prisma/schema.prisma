@@ -80,6 +80,12 @@ model AnalysisJob {
   repoScan   RepoScan?             @relation(fields: [repoScanId], references: [id])
   categories AnalysisJobCategory[]
 
+  // Two more indexes on this table are PARTIAL (WHERE status NOT IN
+  // (terminal...)) and so live only in raw migration SQL, not here:
+  //   - analysis_job_active   -> 20260814000000_init
+  //   - analysis_job_findstale on (started_at) -> supports
+  //     AnalysisJobRepository.findStale(), see
+  //     20260906000000_add_analysis_job_findstale_index
   @@index([actorId, createdAt(sort: Desc)], name: "analysis_job_actor")
   @@map("analysis_job")
 }

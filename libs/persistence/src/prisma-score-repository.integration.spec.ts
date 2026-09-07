@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Prisma } from "@prisma/client";
 import type { CategoryScore, RepoScoreReport } from "@cbd/analysis";
@@ -106,6 +107,55 @@ describe("PrismaScoreRepository (Testcontainers Postgres)", () => {
       expect(partial.id).not.toBe(complete.id);
       const both = await repo.listByRepo(KEY.repoUrl, 10);
       expect(both.map((s) => s.id).sort()).toEqual([complete.id, partial.id].sort());
+    });
+
+    it("saveForced() refreshes the existing status='complete' row IN PLACE instead of throwing P2002 (the forceRescan path)", async () => {
+      const repo = new PrismaScoreRepository(db.prisma);
+      const original = await repo.save(makeReport({ ...KEY, status: "complete", compositeScore: 50 }));
+
+      // A forced re-scan of an unchanged repo: same (repoUrl, commitSha,
+      // engineVersion), new result. save() would throw P2002 here (see the
+      // test above); saveForced() updates the existing row in place.
+      const rescanned = await repo.saveForced(makeReport({ ...KEY, status: "complete", compositeScore: 90 }));
+
+      expect(rescanned.id).toBe(original.id); // same row, stable id
+      expect(rescanned.compositeScore).toBe(90); // fresh data
+
+      // Still exactly one complete row for the key, and findCached sees the
+      // fresh data on the stable id.
+      const found = await repo.findCached(KEY);
+      expect(found?.id).toBe(original.id);
+      expect(found?.compositeScore).toBe(90);
+      const all = await repo.listByRepo(KEY.repoUrl, 10);
+      expect(all).toHaveLength(1);
+      expect(all[0].id).toBe(original.id);
+    });
+
+    it("saveForced() keeps a referencing analysis_job.repo_scan_id intact (the ON DELETE SET NULL / 500 guard)", async () => {
+      const repo = new PrismaScoreRepository(db.prisma);
+      const original = await repo.save(makeReport({ ...KEY, status: "complete", compositeScore: 50 }));
+
+      // A prior completed job points at that scan — exactly what
+      // get-analysis-response.ts assumes always holds for a completed job.
+      const job = await db.prisma.analysisJob.create({
+        data: {
+          repoUrl: KEY.repoUrl,
+          commitSha: KEY.commitSha,
+          engineVersion: KEY.engineVersion,
+          actorId: "actor-1",
+          reservationId: randomUUID(),
+          status: "completed",
+          repoScanId: original.id,
+        },
+      });
+
+      await repo.saveForced(makeReport({ ...KEY, status: "complete", compositeScore: 90 }));
+
+      const reloaded = await db.prisma.analysisJob.findUniqueOrThrow({ where: { id: job.id } });
+      // If saveForced() had deleted+reinserted the scan, the FK
+      // (ON DELETE SET NULL) would have nulled this — turning
+      // GET /analyses/<job> into a 500.
+      expect(reloaded.repoScanId).toBe(original.id);
     });
 
     it("allows a later status='complete' insert for the same key after an earlier status='partial' exists", async () => {

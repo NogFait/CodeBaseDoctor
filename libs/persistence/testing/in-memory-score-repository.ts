@@ -36,6 +36,25 @@ export class InMemoryScoreRepository implements ScoreRepositoryPort {
     return scan;
   }
 
+  /**
+   * Mirrors PrismaScoreRepository.saveForced: refresh the existing
+   * status='complete' row for this cache key IN PLACE (fresh data, SAME id),
+   * or insert when nothing is cached yet. The stable id is what keeps
+   * historical analysis_job.repo_scan_id FKs valid.
+   */
+  async saveForced(report: RepoScoreReport): Promise<RepoScan> {
+    const target = cacheKeyOf(report);
+    const existing = [...this.rows.values()]
+      .filter((s) => cacheKeyOf(s) === target && s.status === "complete")
+      .sort((a, b) => +b.createdAt - +a.createdAt)[0];
+    if (!existing) {
+      return this.save(report);
+    }
+    const refreshed: RepoScan = { ...report, id: existing.id };
+    this.rows.set(existing.id, refreshed);
+    return refreshed;
+  }
+
   async findById(id: string): Promise<RepoScan | null> {
     return this.rows.get(id) ?? null;
   }

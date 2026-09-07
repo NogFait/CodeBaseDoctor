@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CloneTimeoutError,
+  HeadCallRateLimitExceededError,
   InvalidRepoUrlError,
   QuotaExceededError,
   RepoNotAccessibleError,
@@ -57,5 +58,15 @@ describe("port error classes", () => {
     expect(err.actorId).toBe("actor-123");
     expect(err.limit).toBe(5);
     expect(err.resetsAt).toBe(resetsAt);
+  });
+
+  it("HeadCallRateLimitExceededError carries actor, limit, and reset time — distinct from QuotaExceededError", () => {
+    const resetsAt = new Date("2026-08-15T01:00:00Z");
+    const err = new HeadCallRateLimitExceededError("actor-123", 20, resetsAt);
+    expect(err.name).toBe("HeadCallRateLimitExceededError");
+    expect(err.actorId).toBe("actor-123");
+    expect(err.limit).toBe(20);
+    expect(err.resetsAt).toBe(resetsAt);
+    expect(err).not.toBeInstanceOf(QuotaExceededError);
   });
 });

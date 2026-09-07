@@ -136,5 +136,42 @@ describe("mapAnalysisJobToResponse", () => {
 
     expect(response.status).toBe("failed");
     expect("result" in response).toBe(false);
+    expect("problem" in response).toBe(false);
+  });
+
+  it("'failed' by a scan timeout carries the reconstructed 504 /errors/scan-timeout problem", () => {
+    const job = baseJob({
+      status: "failed",
+      errorCode: "ScanTimeoutError",
+      errorMessage: "Scan did not complete within 300000ms",
+    });
+
+    const response = mapAnalysisJobToResponse(job, null);
+
+    expect(response.status).toBe("failed");
+    if (response.status !== "failed") throw new Error("unreachable");
+    expect(response.problem).toMatchObject({
+      status: 504,
+      type: "/errors/scan-timeout",
+      extra: { timeoutMs: 300_000 },
+    });
+  });
+
+  it("'failed' by a clone timeout carries the reconstructed 504 /errors/scan-timeout problem", () => {
+    const job = baseJob({
+      status: "failed",
+      errorCode: "CloneTimeoutError",
+      errorMessage: "Clone did not complete within 120000ms",
+    });
+
+    const response = mapAnalysisJobToResponse(job, null);
+
+    expect(response.status).toBe("failed");
+    if (response.status !== "failed") throw new Error("unreachable");
+    expect(response.problem).toMatchObject({
+      status: 504,
+      type: "/errors/scan-timeout",
+      extra: { timeoutMs: 120_000 },
+    });
   });
 });

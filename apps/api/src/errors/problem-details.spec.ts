@@ -1,13 +1,16 @@
 import { NotFoundException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import {
+  CloneTimeoutError,
+  HeadCallRateLimitExceededError,
   InvalidRepoUrlError,
   QuotaExceededError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  ScanTimeoutError,
   TooManyFilesError,
 } from "@cbd/analysis";
-import { mapErrorToProblem } from "./problem-details";
+import { mapErrorToProblem, mapFailedJobToProblem } from "./problem-details";
 
 describe("mapErrorToProblem", () => {
   it("maps InvalidRepoUrlError to 400 /errors/invalid-repo-url with the offending repoUrl", () => {
@@ -81,5 +84,77 @@ describe("mapErrorToProblem", () => {
     const mapped = mapErrorToProblem(new Error("something unexpected"));
     expect(mapped.status).toBe(500);
     expect(mapped.type).toBe("about:blank");
+  });
+
+  it("maps ScanTimeoutError to 504 /errors/scan-timeout with timeoutMs", () => {
+    const mapped = mapErrorToProblem(new ScanTimeoutError(300_000));
+    expect(mapped.status).toBe(504);
+    expect(mapped.type).toBe("/errors/scan-timeout");
+    expect(mapped.extra).toMatchObject({ timeoutMs: 300_000 });
+  });
+
+  it("maps HeadCallRateLimitExceededError to 429 /errors/rate-limited — DISTINCT from /errors/quota-exceeded", () => {
+    // Distinct concept from QuotaExceededError (the daily 5-free-analyses
+    // limit): this one means "you're hitting the repo-lookup endpoint too
+    // fast", a wholly separate gate (Fix C) — must map to its OWN type, not
+    // reuse /errors/quota-exceeded.
+    const resetsAt = new Date(Date.now() + 1_800_000);
+    const mapped = mapErrorToProblem(new HeadCallRateLimitExceededError("actor-1", 20, resetsAt));
+    expect(mapped.status).toBe(429);
+    expect(mapped.type).toBe("/errors/rate-limited");
+    expect(mapped.type).not.toBe("/errors/quota-exceeded");
+    expect(mapped.extra).toMatchObject({ limit: 20 });
+  });
+
+  it("HeadCallRateLimitExceededError's Retry-After header reflects resetsAt, same derivation as quota-exceeded", () => {
+    const resetsAt = new Date(Date.now() + 120_000);
+    const mapped = mapErrorToProblem(new HeadCallRateLimitExceededError("actor-2", 5, resetsAt));
+    expect(mapped.headers?.["Retry-After"]).toBeDefined();
+    const retryAfterSeconds = Number(mapped.headers?.["Retry-After"]);
+    expect(retryAfterSeconds).toBeGreaterThan(110);
+    expect(retryAfterSeconds).toBeLessThanOrEqual(120);
+  });
+
+  it("maps CloneTimeoutError to the SAME 504 /errors/scan-timeout type as ScanTimeoutError", () => {
+    // Deliberately the same public error type as ScanTimeoutError — same
+    // "collapse distinct internal phases into one API-facing type" pattern
+    // as TooManyFilesError/RepoTooLargeError above: clone-phase vs
+    // scan-phase timeout is an internal distinction, not one the API
+    // consumer needs to react to differently.
+    const mapped = mapErrorToProblem(new CloneTimeoutError(120_000));
+    expect(mapped.status).toBe(504);
+    expect(mapped.type).toBe("/errors/scan-timeout");
+    expect(mapped.extra).toMatchObject({ timeoutMs: 120_000 });
+  });
+});
+
+describe("mapFailedJobToProblem", () => {
+  // The GET /analyses/:id path never has the original thrown Error
+  // instance — only the persisted `errorCode`/`errorMessage` strings
+  // AnalysisProcessor's describeError() wrote onto the job row (see
+  // libs/jobs/src/analysis-processor.ts). This reconstructs a problem from
+  // exactly that persisted shape.
+  it("reconstructs a 504 /errors/scan-timeout problem from a persisted ScanTimeoutError errorCode/errorMessage", () => {
+    const problem = mapFailedJobToProblem("ScanTimeoutError", "Scan did not complete within 300000ms");
+    expect(problem).not.toBeNull();
+    expect(problem?.status).toBe(504);
+    expect(problem?.type).toBe("/errors/scan-timeout");
+    expect(problem?.extra).toMatchObject({ timeoutMs: 300_000 });
+  });
+
+  it("reconstructs a 504 /errors/scan-timeout problem from a persisted CloneTimeoutError errorCode/errorMessage", () => {
+    const problem = mapFailedJobToProblem("CloneTimeoutError", "Clone did not complete within 120000ms");
+    expect(problem).not.toBeNull();
+    expect(problem?.status).toBe(504);
+    expect(problem?.type).toBe("/errors/scan-timeout");
+    expect(problem?.extra).toMatchObject({ timeoutMs: 120_000 });
+  });
+
+  it("returns null for a non-timeout failure cause (e.g. BELOW_THRESHOLD), so callers keep their existing fallback", () => {
+    expect(mapFailedJobToProblem("BELOW_THRESHOLD", "only 3/6 categories scored")).toBeNull();
+  });
+
+  it("returns null when errorCode is null (no failure recorded yet)", () => {
+    expect(mapFailedJobToProblem(null, null)).toBeNull();
   });
 });

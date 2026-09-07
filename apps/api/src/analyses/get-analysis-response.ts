@@ -1,5 +1,6 @@
 import type { AnalysisJobRecord } from "@cbd/persistence";
 import type { RepoScan } from "@cbd/analysis";
+import { mapFailedJobToProblem, type MappedProblem } from "../errors/problem-details";
 
 /**
  * Pure `GET /analyses/:id` response mapper (Task F / task 5.2). Extracted
@@ -51,6 +52,13 @@ export type AnalysisStatusResponse =
       jobId: string;
       status: "failed";
       cached: false;
+      /** Present only when the failure cause is one `mapFailedJobToProblem`
+       * recognizes (currently: a clone/scan timeout) — see its doc comment
+       * in problem-details.ts. The controller (analyses.controller.ts)
+       * uses this to return a proper RFC 9457 response (504
+       * /errors/scan-timeout) instead of the bare fallback below. Absent
+       * for every other failure cause (e.g. BELOW_THRESHOLD). */
+      problem?: MappedProblem;
     };
 
 export function mapAnalysisJobToResponse(job: AnalysisJobRecord, scan: RepoScan | null): AnalysisStatusResponse {
@@ -82,5 +90,8 @@ export function mapAnalysisJobToResponse(job: AnalysisJobRecord, scan: RepoScan 
   }
 
   // job.status === 'failed' (the only remaining JobStatus value)
-  return { jobId: job.id, status: "failed", cached: false };
+  const problem = mapFailedJobToProblem(job.errorCode, job.errorMessage);
+  return problem
+    ? { jobId: job.id, status: "failed", cached: false, problem }
+    : { jobId: job.id, status: "failed", cached: false };
 }

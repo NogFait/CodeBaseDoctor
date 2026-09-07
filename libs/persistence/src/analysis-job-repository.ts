@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma, type JobStatus, type CategoryStatus } from "@prisma/client";
 import type { CategoryId } from "@cbd/analysis";
+import { UUID_PATTERN } from "./uuid";
 
 /**
  * AnalysisJobRepository — Prisma-backed bookkeeping for `analysis_job` /
@@ -29,11 +30,27 @@ const ALL_CATEGORIES: readonly CategoryId[] = [
 // finishedAt) — see updateStatus() below.
 const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "completed_partial", "failed"]);
 
+// Every JobStatus value that is NOT terminal — exported for callers (e.g.
+// StaleJobWatchdogService) that need a compare-and-swap "only if still
+// in-flight" guard via updateStatusIfCurrentlyIn() below.
+export const NON_TERMINAL_STATUSES: readonly JobStatus[] = ["queued", "resolving", "cloning", "analyzing", "aggregating"];
+
+// Upper bound on the rows one findStale() call returns, i.e. the most jobs
+// StaleJobWatchdogService.sweep() will act on per scheduler tick. sweep()
+// fans out ~2 pooled DB ops per row concurrently (a CAS `updateMany` + an
+// advisory-lock refund txn), so an UNBOUNDED result under a mass
+// worker-crash would saturate the Prisma connection pool, make sweep()
+// reject, and leave the scheduler retrying the same herd every tick. 50 is
+// comfortably below a default Prisma pool while still clearing a normal
+// backlog in a single tick; a larger backlog drains deterministically
+// (oldest-first) across successive ticks.
+export const STALE_JOB_SWEEP_BATCH_SIZE = 50;
+
 // Same UUID-shape guard pattern as PrismaScoreRepository.findById(): the
 // `id` column is `@db.Uuid`, so Postgres rejects a non-UUID string as a hard
 // query error, not a "no rows" result. Guarding here treats a malformed id
 // as "not found", matching the softer Map-like semantics callers expect.
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// `UUID_PATTERN` is the shared definition — see ./uuid.
 
 export interface CreateAnalysisJobInput {
   repoUrl: string;
@@ -149,24 +166,91 @@ export class AnalysisJobRepository {
    * corrupting state.
    */
   async updateStatus(id: string, status: JobStatus, extra: UpdateAnalysisJobStatusExtra = {}): Promise<void> {
-    const current = await this.prisma.analysisJob.findUniqueOrThrow({
-      where: { id },
-      select: { startedAt: true },
+    const now = new Date();
+
+    // One round-trip: the row write plus, only when leaving 'queued', a
+    // scoped `startedAt` write — batched in a single transaction. This
+    // replaces a `findUniqueOrThrow({ startedAt })` + separate `update()`
+    // (two round-trips): the read existed ONLY to enforce `startedAt`'s
+    // write-once rule, which the `startedAt: null` filter below now enforces
+    // in the database instead. The leading `update()` (not `updateMany`)
+    // preserves the original contract that an unknown `id` is a hard error
+    // (Prisma P2025), exactly as the removed `findUniqueOrThrow()` did.
+    const writes: Prisma.PrismaPromise<unknown>[] = [
+      this.prisma.analysisJob.update({ where: { id }, data: this.statusUpdateData(status, extra, now) }),
+    ];
+
+    if (status !== "queued") {
+      // `startedAt` is set exactly once, on the first transition away from
+      // 'queued'; `where: { startedAt: null }` makes that write-once and
+      // never overwrites an already-set value on a later transition.
+      writes.push(
+        this.prisma.analysisJob.updateMany({ where: { id, startedAt: null }, data: { startedAt: now } }),
+      );
+    }
+
+    await this.prisma.$transaction(writes);
+  }
+
+  /**
+   * The `data` payload shared verbatim by `updateStatus()` and
+   * `updateStatusIfCurrentlyIn()`: the new `status`, whichever optional
+   * `extra` columns were supplied, and `finishedAt` when `status` is
+   * terminal. `updateStatus()` layers its own write-once `startedAt` rule
+   * on top (see there); the CAS variant uses this as-is.
+   */
+  private statusUpdateData(
+    status: JobStatus,
+    extra: UpdateAnalysisJobStatusExtra,
+    now: Date,
+  ): Prisma.AnalysisJobUpdateManyMutationInput {
+    return {
+      status,
+      ...(extra.commitSha !== undefined ? { commitSha: extra.commitSha } : {}),
+      ...(extra.errorCode !== undefined ? { errorCode: extra.errorCode } : {}),
+      ...(extra.errorMessage !== undefined ? { errorMessage: extra.errorMessage } : {}),
+      ...(extra.repoScanId !== undefined ? { repoScanId: extra.repoScanId } : {}),
+      ...(extra.bullJobId !== undefined ? { bullJobId: extra.bullJobId } : {}),
+      ...(TERMINAL_STATUSES.has(status) ? { finishedAt: now } : {}),
+    };
+  }
+
+  /**
+   * Compare-and-swap status transition: only writes `status` if the row's
+   * CURRENT status is still one of `fromStatuses` at write time — via a
+   * single conditional `UPDATE ... WHERE id = $1 AND status IN (...)`
+   * (`updateMany` so Prisma gives us the affected-row count instead of
+   * throwing `RecordNotFound` on a miss). Returns `true` iff the write
+   * actually happened (count === 1), `false` if the row had already moved
+   * to some other status by the time this ran (a legitimate concurrent
+   * writer won the race) — in which case NOTHING is written here.
+   *
+   * Exists for StaleJobWatchdogService.sweep(): findStale() takes a
+   * snapshot, then this method is the per-job write, closing the race where
+   * a real AnalysisProcessor finishes that same job (to a terminal status)
+   * in between — see that class's doc comment. Deliberately a SEPARATE
+   * method from the general updateStatus() above (which stays unconditional
+   * for AnalysisProcessor's own use) rather than overloading it, since
+   * changing updateStatus()'s own behavior would affect every caller.
+   *
+   * Unlike updateStatus(), this does NOT manage `startedAt` — every current
+   * caller only CAS-transitions a job that has already started (it's only
+   * ever reached via findStale(), whose query itself requires a non-null
+   * startedAt), so there is no "first move away from queued" case to
+   * handle here.
+   */
+  async updateStatusIfCurrentlyIn(
+    id: string,
+    fromStatuses: readonly JobStatus[],
+    status: JobStatus,
+    extra: UpdateAnalysisJobStatusExtra = {},
+  ): Promise<boolean> {
+    const result = await this.prisma.analysisJob.updateMany({
+      where: { id, status: { in: [...fromStatuses] } },
+      data: this.statusUpdateData(status, extra, new Date()),
     });
 
-    await this.prisma.analysisJob.update({
-      where: { id },
-      data: {
-        status,
-        ...(extra.commitSha !== undefined ? { commitSha: extra.commitSha } : {}),
-        ...(extra.errorCode !== undefined ? { errorCode: extra.errorCode } : {}),
-        ...(extra.errorMessage !== undefined ? { errorMessage: extra.errorMessage } : {}),
-        ...(extra.repoScanId !== undefined ? { repoScanId: extra.repoScanId } : {}),
-        ...(extra.bullJobId !== undefined ? { bullJobId: extra.bullJobId } : {}),
-        ...(status !== "queued" && current.startedAt === null ? { startedAt: new Date() } : {}),
-        ...(TERMINAL_STATUSES.has(status) ? { finishedAt: new Date() } : {}),
-      },
-    });
+    return result.count === 1;
   }
 
   async attachBullJobId(id: string, bullJobId: string): Promise<void> {
@@ -205,6 +289,20 @@ export class AnalysisJobRepository {
    * "stuck" in the watchdog's sense) — no separate `IS NOT NULL` clause
    * needed. `TERMINAL_STATUSES` is reused, not redefined, from
    * `updateStatus()`'s own module-level constant.
+   *
+   * Index: relies on the partial index `analysis_job_findstale` on
+   * `(started_at) WHERE status NOT IN ('completed','completed_partial','failed')`
+   * — see prisma/migrations/20260906000000_add_analysis_job_findstale_index.
+   * Its predicate matches this WHERE exactly, so the scan is limited to
+   * in-flight rows and ordered by `started_at` for the `< olderThan` range —
+   * which is also the exact index the `orderBy` below rides.
+   *
+   * Bounded at `STALE_JOB_SWEEP_BATCH_SIZE`: `StaleJobWatchdogService.sweep()`
+   * processes every returned row with a concurrent per-row DB fan-out, so an
+   * unbounded result under a mass worker-crash would stampede the Prisma
+   * connection pool. `orderBy: startedAt asc` makes the batch deterministic
+   * and oldest-first, so a backlog larger than one batch drains predictably
+   * across successive scheduler ticks rather than in one unbounded pass.
    */
   async findStale(olderThan: Date): Promise<StaleAnalysisJob[]> {
     const rows = await this.prisma.analysisJob.findMany({
@@ -213,6 +311,8 @@ export class AnalysisJobRepository {
         status: { notIn: [...TERMINAL_STATUSES] },
       },
       select: { id: true, reservationId: true },
+      orderBy: { startedAt: "asc" },
+      take: STALE_JOB_SWEEP_BATCH_SIZE,
     });
     return rows;
   }

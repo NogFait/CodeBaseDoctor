@@ -98,6 +98,22 @@ export class AnalysesController {
     }
 
     const response = mapAnalysisJobToResponse(job, scan);
+
+    // A job that failed because of a clone/scan timeout carries a
+    // reconstructed RFC 9457 `problem` (see get-analysis-response.ts /
+    // mapFailedJobToProblem in problem-details.ts) — surface it as a real
+    // 504 application/problem+json response instead of the bare 200
+    // `{jobId, status:'failed', cached:false}` fallback used for every
+    // other failure cause. This bypasses `ProblemDetailsFilter` on
+    // purpose: nothing is THROWN here (the job already finished, terminally,
+    // in the past), there's just a status/body to build from data already
+    // in hand.
+    if (response.status === "failed" && response.problem) {
+      const { problem } = response;
+      res.status(problem.status).contentType("application/problem+json");
+      return { type: problem.type, title: problem.title, status: problem.status, jobId: response.jobId, ...problem.extra };
+    }
+
     res.status(response.status === "analyzing" ? 202 : 200);
     return response;
   }

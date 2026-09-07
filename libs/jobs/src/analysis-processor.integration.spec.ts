@@ -305,6 +305,184 @@ describe("AnalysisProcessor (Testcontainers Redis + Postgres)", () => {
     expect(decision.remaining).toBe(5);
   });
 
+  it("(bug fix: initial status write outside try/catch) the initial 'analyzing' status write throwing still results in the job marked failed and quota refunded", async () => {
+    const reservationId = randomUUID();
+    const quota = new InMemoryQuota({ limit: 5 });
+    const service = new RepoAnalysisService(
+      new FixtureRepoSource(FIXTURE_DIR, REPO_URL),
+      new PrismaScoreRepository(db.prisma),
+      quota,
+      allSixAnalyzers(),
+    );
+    const processor = new AnalysisProcessor(service, jobsRepo, quota);
+    const { id: analysisJobId } = await jobsRepo.create({
+      repoUrl: REPO_URL,
+      engineVersion: "test-engine",
+      actorId: ACTOR_ID,
+      reservationId,
+    });
+
+    // Fail only the FIRST updateStatus() call (the initial 'analyzing'
+    // write) — every subsequent call (including the catch block's 'failed'
+    // write) uses the real implementation.
+    vi.spyOn(jobsRepo, "updateStatus").mockImplementationOnce(async () => {
+      throw new Error("simulated transient DB error on initial status write");
+    });
+
+    const bullJob = await runJob(processor, analysisJobId, { repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId });
+    await expect(bullJob.waitUntilFinished(queueEvents, 30_000)).rejects.toThrow();
+
+    const record = await jobsRepo.findById(analysisJobId);
+    expect(record?.status).toBe("failed");
+    expect(quota.refundCalls).toContain(reservationId);
+    const decision = await quota.peek(ACTOR_ID);
+    expect(decision.remaining).toBe(5);
+  });
+
+  it("(bug fix: refund not guarded by try/finally) the failure-path 'failed' status write throwing still refunds the quota", async () => {
+    const reservationId = randomUUID();
+    const quota = new InMemoryQuota({ limit: 5 });
+    const throwingRepoSource = repoSourceThatFailsToMaterialize(
+      new FixtureRepoSource(FIXTURE_DIR, REPO_URL),
+      new CloneTimeoutError(120_000),
+    );
+    const service = new RepoAnalysisService(
+      throwingRepoSource,
+      new PrismaScoreRepository(db.prisma),
+      quota,
+      allSixAnalyzers(), // never reached — materialize() throws before the fan-out
+    );
+    const processor = new AnalysisProcessor(service, jobsRepo, quota);
+    const { id: analysisJobId } = await jobsRepo.create({
+      repoUrl: REPO_URL,
+      engineVersion: "test-engine",
+      actorId: ACTOR_ID,
+      reservationId,
+    });
+
+    // Call #1 is the initial 'analyzing' write (must succeed for real, so
+    // analyze() actually runs and throws CloneTimeoutError). Call #2 is the
+    // catch block's 'failed' write — fail exactly that one to prove refund
+    // isn't gated behind it succeeding.
+    const originalUpdateStatus = jobsRepo.updateStatus.bind(jobsRepo);
+    let calls = 0;
+    vi.spyOn(jobsRepo, "updateStatus").mockImplementation(async (id, status, extra) => {
+      calls += 1;
+      if (calls === 2) {
+        throw new Error("simulated transient DB error on failure-path status write");
+      }
+      return originalUpdateStatus(id, status, extra);
+    });
+
+    const bullJob = await runJob(processor, analysisJobId, { repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId });
+    await expect(bullJob.waitUntilFinished(queueEvents, 30_000)).rejects.toThrow();
+
+    // The 'failed' status write itself failed, so the row legitimately
+    // never reached 'failed' here — the hard, non-negotiable requirement is
+    // the refund, which must NOT be gated behind that write succeeding.
+    expect(quota.refundCalls).toContain(reservationId);
+    const decision = await quota.peek(ACTOR_ID);
+    expect(decision.remaining).toBe(5);
+  });
+
+  it("(refund-before-status-write ordering) the catch block commits the refund BEFORE writing the 'failed' status, not after", async () => {
+    const reservationId = randomUUID();
+    const quota = new InMemoryQuota({ limit: 5 });
+    const throwingRepoSource = repoSourceThatFailsToMaterialize(
+      new FixtureRepoSource(FIXTURE_DIR, REPO_URL),
+      new CloneTimeoutError(120_000),
+    );
+    const service = new RepoAnalysisService(
+      throwingRepoSource,
+      new PrismaScoreRepository(db.prisma),
+      quota,
+      allSixAnalyzers(), // never reached — materialize() throws before the fan-out
+    );
+    const processor = new AnalysisProcessor(service, jobsRepo, quota);
+    const { id: analysisJobId } = await jobsRepo.create({
+      repoUrl: REPO_URL,
+      engineVersion: "test-engine",
+      actorId: ACTOR_ID,
+      reservationId,
+    });
+
+    // Record the order in which the catch block's two side effects fire.
+    // Call #1 of updateStatus is the initial 'analyzing' write (real, not
+    // tracked) — only the catch block's 'failed' write (call #2) matters
+    // here.
+    const callOrder: string[] = [];
+    const originalUpdateStatus = jobsRepo.updateStatus.bind(jobsRepo);
+    let updateStatusCalls = 0;
+    vi.spyOn(jobsRepo, "updateStatus").mockImplementation(async (id, status, extra) => {
+      updateStatusCalls += 1;
+      if (updateStatusCalls === 2) callOrder.push("status-write");
+      return originalUpdateStatus(id, status, extra);
+    });
+    const originalRefund = quota.refund.bind(quota);
+    vi.spyOn(quota, "refund").mockImplementation(async (resId) => {
+      callOrder.push("refund");
+      return originalRefund(resId);
+    });
+
+    const bullJob = await runJob(processor, analysisJobId, { repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId });
+    await expect(bullJob.waitUntilFinished(queueEvents, 30_000)).rejects.toThrow();
+
+    // The refund must commit BEFORE the 'failed' status write is issued —
+    // closes the window where a polling client could observe
+    // status:'failed' while the refund hasn't landed yet.
+    expect(callOrder).toEqual(["refund", "status-write"]);
+
+    const record = await jobsRepo.findById(analysisJobId);
+    expect(record?.status).toBe("failed");
+    expect(quota.refundCalls).toContain(reservationId);
+  });
+
+  it("(refund-before-status-write ordering) refund still commits even when the subsequent 'failed' status write throws", async () => {
+    const reservationId = randomUUID();
+    const quota = new InMemoryQuota({ limit: 5 });
+    const throwingRepoSource = repoSourceThatFailsToMaterialize(
+      new FixtureRepoSource(FIXTURE_DIR, REPO_URL),
+      new CloneTimeoutError(120_000),
+    );
+    const service = new RepoAnalysisService(
+      throwingRepoSource,
+      new PrismaScoreRepository(db.prisma),
+      quota,
+      allSixAnalyzers(), // never reached — materialize() throws before the fan-out
+    );
+    const processor = new AnalysisProcessor(service, jobsRepo, quota);
+    const { id: analysisJobId } = await jobsRepo.create({
+      repoUrl: REPO_URL,
+      engineVersion: "test-engine",
+      actorId: ACTOR_ID,
+      reservationId,
+    });
+
+    // Call #1 is the initial 'analyzing' write (must succeed for real, so
+    // analyze() actually runs and throws CloneTimeoutError). Call #2 is the
+    // catch block's 'failed' write — fail it to prove the refund (which
+    // must now run BEFORE this write is even attempted) is wholly
+    // unaffected by this write throwing.
+    const originalUpdateStatus = jobsRepo.updateStatus.bind(jobsRepo);
+    let updateStatusCalls = 0;
+    vi.spyOn(jobsRepo, "updateStatus").mockImplementation(async (id, status, extra) => {
+      updateStatusCalls += 1;
+      if (updateStatusCalls === 2) {
+        throw new Error("simulated transient DB error on failure-path status write");
+      }
+      return originalUpdateStatus(id, status, extra);
+    });
+
+    const bullJob = await runJob(processor, analysisJobId, { repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId });
+    await expect(bullJob.waitUntilFinished(queueEvents, 30_000)).rejects.toThrow();
+
+    // The refund is not gated behind the status write succeeding — same
+    // hard requirement as before the reorder, just with the order flipped.
+    expect(quota.refundCalls).toContain(reservationId);
+    const decision = await quota.peek(ACTOR_ID);
+    expect(decision.remaining).toBe(5);
+  });
+
   it("(per-category live progress) observes a 'running' transition before the terminal status for a given category", async () => {
     const reservationId = randomUUID();
     const quota = new InMemoryQuota({ limit: 5 });

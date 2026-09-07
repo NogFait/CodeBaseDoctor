@@ -22,6 +22,10 @@ export interface AnalysisJobData {
   repoUrl: string;
   actorId: string;
   reservationId: string;
+  /** Explicit user "Re-scan" — forwarded verbatim to
+   * `RepoAnalysisService.analyze()` so the worker skips its own cache
+   * lookup. See `EnqueueAnalysisPayload.forceRescan`. */
+  forceRescan?: boolean;
 }
 
 function describeError(error: unknown): { errorCode: string; errorMessage: string } {
@@ -101,13 +105,7 @@ export class AnalysisProcessor extends WorkerHost {
   }
 
   async process(job: Job<AnalysisJobData>): Promise<void> {
-    const { analysisJobId, repoUrl, actorId, reservationId } = job.data;
-
-    // One coarse in-flight status — RepoAnalysisService.analyze() doesn't
-    // expose resolve/clone/scan/aggregate sub-phases, and adding them here
-    // would be speculative. Per-CATEGORY progress via onProgress below is
-    // the real granular signal this task needs to produce.
-    await this.jobs.updateStatus(analysisJobId, "analyzing");
+    const { analysisJobId, repoUrl, actorId, reservationId, forceRescan } = job.data;
 
     // AnalyzerRunner's onProgress callback is synchronous — see
     // analyzer-runner.ts, `onProgress?.({...})` is never awaited by the
@@ -164,7 +162,22 @@ export class AnalysisProcessor extends WorkerHost {
     };
 
     try {
-      const scan = await this.repoAnalysisService.analyze({ repoUrl, actorId, reservationId }, onProgress);
+      // One coarse in-flight status — RepoAnalysisService.analyze() doesn't
+      // expose resolve/clone/scan/aggregate sub-phases, and adding them
+      // here would be speculative. Per-CATEGORY progress via onProgress
+      // above is the real granular signal this task needs to produce.
+      //
+      // Deliberately INSIDE the try: this write itself can throw (e.g.
+      // updateStatus()'s row UPDATE hitting a transient DB error, or a
+      // Prisma P2025 if the row is gone) — it must be covered by the SAME
+      // failed+refund handling as every other failure mode below, per this
+      // class's own documented "on ANY thrown error" guarantee.
+      await this.jobs.updateStatus(analysisJobId, "analyzing");
+
+      const scan = await this.repoAnalysisService.analyze(
+        { repoUrl, actorId, reservationId, forceRescan },
+        onProgress,
+      );
       await Promise.all(pendingCategoryWrites);
       await this.jobs.updateStatus(analysisJobId, scan.status === "complete" ? "completed" : "completed_partial", {
         repoScanId: scan.id,
@@ -172,11 +185,43 @@ export class AnalysisProcessor extends WorkerHost {
     } catch (error) {
       await Promise.all(pendingCategoryWrites);
       const { errorCode, errorMessage } = describeError(error);
-      await this.jobs.updateStatus(analysisJobId, "failed", { errorCode, errorMessage });
-      // Unconditional — relying on refund()'s idempotency. See class doc
-      // comment above for why this must NOT special-case which errors
-      // already refunded internally.
-      await this.quota.refund(reservationId);
+      try {
+        // Refund FIRST, status write SECOND: by the time we're in this
+        // catch block, "this job failed, refund unconditionally" is already
+        // the decision — there's no conditional/racing logic left gating
+        // whether to refund (unlike apps/worker's stale-job-watchdog, whose
+        // CAS status write must run first because ITS refund decision
+        // depends on the write's own result). Committing the refund before
+        // the status write closes the window where a client polling
+        // GET /analyses/:id in that exact instant could observe
+        // status:'failed' before the refund has actually landed. Relying on
+        // refund()'s documented idempotency for the one case where
+        // AnalysisBelowThresholdError already refunded internally.
+        await this.quota.refund(reservationId);
+      } catch (refundError) {
+        // Log it but do NOT let it replace/mask the ORIGINAL error being
+        // handled, and — the hard requirement — do NOT let it skip the
+        // status write below.
+        this.logger.error(
+          `Failed to refund reservation ${reservationId} for job ${analysisJobId} (original error: ${errorCode}: ${errorMessage})`,
+          refundError instanceof Error ? refundError.stack : String(refundError),
+        );
+      } finally {
+        // GUARANTEED to be attempted regardless of whether the refund above
+        // succeeded — same non-negotiable guarantee as before the reorder,
+        // just with the roles flipped. The status write itself can still
+        // throw (e.g. updateStatus()'s row UPDATE hitting a transient DB
+        // error); that's logged, not re-thrown, so it never masks the
+        // original error either.
+        try {
+          await this.jobs.updateStatus(analysisJobId, "failed", { errorCode, errorMessage });
+        } catch (statusWriteError) {
+          this.logger.error(
+            `Failed to persist 'failed' status for job ${analysisJobId} (original error: ${errorCode}: ${errorMessage})`,
+            statusWriteError instanceof Error ? statusWriteError.stack : String(statusWriteError),
+          );
+        }
+      }
       throw error;
     }
   }

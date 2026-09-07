@@ -19,6 +19,23 @@ import { ScoreAggregator } from "./score-aggregator";
  * 6), the job fails outright — no RepoScan is persisted and the quota
  * reservation is refunded. At/above it, a 'complete' (6/6) or 'partial'
  * (4-5/6) report is persisted and quota is kept.
+ *
+ * Why 4, and why this check is rarely the thing that fails a job:
+ * only 2 of the 6 categories (Architecture, Documentation) are LLM-judged;
+ * the other 4 (Security, Testing, Maintainability, Performance) are
+ * deterministic offline heuristics that essentially always produce a score.
+ * So `scoredCount` is effectively always >= 4 from the deterministic
+ * analyzers alone, and `AnalysisBelowThresholdError` (job `failed` + quota
+ * refund via THIS check) is reachable in practice only if 3+ analyzers
+ * actually throw. The real production `failed` triggers live elsewhere and
+ * are covered by their own tests: `ScanTimeoutError`/`CloneTimeoutError`
+ * (-> 504), clone failure, the oversized-repo ingestion gate, and the
+ * stale-job watchdog.
+ *
+ * 4 is a deliberate product bar: a 4/6 report — both qualitative dimensions
+ * possibly absent — is still persisted as `partial` because the
+ * deterministic measured signal is considered a sufficient backbone.
+ * Raising the bar was considered and declined.
  */
 const MIN_SCORED_CATEGORIES = 4;
 
@@ -39,6 +56,14 @@ export interface AnalyzeRepoRequest {
   repoUrl: string;
   actorId: string;
   reservationId: string;
+  /**
+   * Explicit user "Re-scan": skip the cache lookup below and re-run the
+   * full pipeline even when an identical-key scan is already cached. The
+   * fresh result is persisted via `ScoreRepositoryPort.saveForced()` (which
+   * refreshes the existing complete row in place). Absent/false = current
+   * behavior.
+   */
+  forceRescan?: boolean;
 }
 
 /**
@@ -87,13 +112,19 @@ export class RepoAnalysisService {
     const ref = await this.repoSource.resolve(request.repoUrl);
     const metadata = await this.repoSource.head(ref);
 
-    const cached = await this.scores.findCached({
-      repoUrl: ref.url,
-      commitSha: metadata.headSha,
-      engineVersion: this.engineVersion,
-    });
-    if (cached) {
-      return cached;
+    // forceRescan bypasses the cache lookup entirely — an explicit re-scan
+    // must re-run the analyzers even for an unchanged repo. Everything after
+    // (quota consume, materialize, analyze, aggregate, threshold) runs
+    // identically; only the final persist differs (saveForced vs save).
+    if (!request.forceRescan) {
+      const cached = await this.scores.findCached({
+        repoUrl: ref.url,
+        commitSha: metadata.headSha,
+        engineVersion: this.engineVersion,
+      });
+      if (cached) {
+        return cached;
+      }
     }
 
     // Quota is consumed before any ingestion or analyzer work starts — per
@@ -118,7 +149,9 @@ export class RepoAnalysisService {
         throw new AnalysisBelowThresholdError(scoredCount, MIN_SCORED_CATEGORIES, report);
       }
 
-      return await this.scores.save(report);
+      return await (request.forceRescan
+        ? this.scores.saveForced(report)
+        : this.scores.save(report));
     } finally {
       await workspace.dispose();
     }

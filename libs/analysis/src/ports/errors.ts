@@ -71,3 +71,22 @@ export class QuotaExceededError extends Error {
     this.name = "QuotaExceededError";
   }
 }
+
+/**
+ * Thrown by `HeadCallRateLimiterPort.checkAndRecord()` — a NEW, independent
+ * gate on `RepoSourcePort.head()` call frequency, distinct from
+ * `QuotaExceededError`. `QuotaExceededError` means "you're out of your daily
+ * 5 free analyses"; this means "you're hitting the repo-lookup endpoint too
+ * fast", a different concept entirely (`head()` runs — and can be triggered
+ * — BEFORE quota is ever consumed, see `SubmitAnalysisUseCase.submit()`).
+ */
+export class HeadCallRateLimitExceededError extends Error {
+  constructor(
+    public readonly actorId: string,
+    public readonly limit: number,
+    public readonly resetsAt: Date,
+  ) {
+    super(`Actor "${actorId}" exceeded the repo-lookup rate limit of ${limit} attempts per window`);
+    this.name = "HeadCallRateLimitExceededError";
+  }
+}

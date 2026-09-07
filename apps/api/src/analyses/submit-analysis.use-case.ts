@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
   ANALYZER_VERSIONS,
+  HEAD_CALL_RATE_LIMITER_PORT,
   REPO_SOURCE_PORT,
   SCORE_REPOSITORY_PORT,
   USAGE_QUOTA_PORT,
   computeEngineVersion,
   type CategoryId,
+  type HeadCallRateLimiterPort,
   type QuotaDecision,
   type RepoScan,
   type RepoSourcePort,
@@ -53,7 +55,7 @@ export interface JobRepositoryPort {
 export interface QueueProducerPort {
   enqueue(
     analysisJobId: string,
-    payload: { repoUrl: string; actorId: string; reservationId: string },
+    payload: { repoUrl: string; actorId: string; reservationId: string; forceRescan?: boolean },
   ): Promise<string>;
 }
 
@@ -91,6 +93,7 @@ export class SubmitAnalysisUseCase {
     @Inject(REPO_SOURCE_PORT) private readonly repoSource: RepoSourcePort,
     @Inject(SCORE_REPOSITORY_PORT) private readonly scores: ScoreRepositoryPort,
     @Inject(USAGE_QUOTA_PORT) private readonly quota: UsageQuotaPort,
+    @Inject(HEAD_CALL_RATE_LIMITER_PORT) private readonly headCallRateLimiter: HeadCallRateLimiterPort,
     @Inject(AnalysisJobRepository) private readonly jobs: JobRepositoryPort,
     @Inject(AnalysisQueueProducer) private readonly queueProducer: QueueProducerPort,
   ) {
@@ -115,12 +118,21 @@ export class SubmitAnalysisUseCase {
 
   /**
    * Throws whatever `RepoSourcePort.resolve()`/`.head()` throw (e.g.
-   * `InvalidRepoUrlError`, `RepoNotAccessibleError`, `RepoTooLargeError`) or
-   * `QuotaExceededError` over quota. None are swallowed — the controller
-   * (Task E/F) maps them onto the right HTTP status via the RFC 9457 filter.
+   * `InvalidRepoUrlError`, `RepoNotAccessibleError`, `RepoTooLargeError`),
+   * `HeadCallRateLimitExceededError` over the repo-lookup rate limit, or
+   * `QuotaExceededError` over the daily analysis quota. None are swallowed
+   * — the controller (Task E/F) maps them onto the right HTTP status via
+   * the RFC 9457 filter.
    */
   async submit(request: SubmitAnalysisRequest): Promise<SubmitAnalysisResult> {
     const ref = await this.repoSource.resolve(request.repoUrl);
+    // Fix C: gates the expensive head() call (spins a real Docker
+    // container) BEFORE it's ever invoked — independent of, and checked
+    // regardless of, the daily analysis quota below (which isn't reached
+    // for a cache hit, and can't safely gate head() itself — see
+    // HeadCallRateLimiterPort's own doc comment for why this had to be a
+    // separate port rather than moving quota.consume() earlier).
+    await this.headCallRateLimiter.checkAndRecord(request.actorId);
     const metadata = await this.repoSource.head(ref);
 
     if (!request.forceRescan) {
@@ -153,6 +165,10 @@ export class SubmitAnalysisUseCase {
       repoUrl: ref.url,
       actorId: request.actorId,
       reservationId,
+      // Carried onto the job so the worker's RepoAnalysisService.analyze()
+      // skips its own cache check too — this use case already skipped ITS
+      // cache check above, but the worker does a second, independent one.
+      forceRescan: request.forceRescan === true,
     });
     await this.jobs.attachBullJobId(jobId, bullJobId);
 

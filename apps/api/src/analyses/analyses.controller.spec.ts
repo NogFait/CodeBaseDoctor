@@ -4,6 +4,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  HEAD_CALL_RATE_LIMITER_PORT,
   REPO_SOURCE_PORT,
   SCORE_REPOSITORY_PORT,
   USAGE_QUOTA_PORT,
@@ -11,6 +12,7 @@ import {
   RepoTooLargeError,
   type CategoryId,
   type CategoryScore,
+  type HeadCallRateLimiterPort,
   type IngestionLimits,
   type RepoMetadata,
   type RepoRef,
@@ -115,14 +117,23 @@ class FakeAnalysisJobRepository {
     if (row) row.bullJobId = bullJobId;
   }
 
-  /** Simulates what the future worker processor (task 6.2, not built in
-   * this batch) will do — this is NOT exercising a real end-to-end
-   * pipeline, only the job-table state transition the GET endpoint reads. */
-  async updateStatus(id: string, status: JobStatus, extra: { repoScanId?: string } = {}): Promise<void> {
+  /** Simulates what the worker processor (AnalysisProcessor,
+   * libs/jobs/src/analysis-processor.ts) does to a job's row — this is NOT
+   * exercising a real end-to-end pipeline, only the job-table state
+   * transition the GET endpoint reads. `errorCode`/`errorMessage` mirror
+   * what `describeError()` there writes on a caught failure (e.g.
+   * `ScanTimeoutError`/`CloneTimeoutError`). */
+  async updateStatus(
+    id: string,
+    status: JobStatus,
+    extra: { repoScanId?: string; errorCode?: string; errorMessage?: string } = {},
+  ): Promise<void> {
     const row = this.rows.get(id);
     if (!row) throw new Error(`FakeAnalysisJobRepository: no job "${id}"`);
     row.status = status;
     if (extra.repoScanId !== undefined) row.repoScanId = extra.repoScanId;
+    if (extra.errorCode !== undefined) row.errorCode = extra.errorCode;
+    if (extra.errorMessage !== undefined) row.errorMessage = extra.errorMessage;
   }
 }
 
@@ -144,6 +155,13 @@ function sixScoredCategories(): CategoryScore[] {
     findings: [],
     durationMs: 5,
   }));
+}
+
+/** Fix C — always allows every attempt; not exercised by this controller
+ * suite's own scenarios (that's submit-analysis.use-case.spec.ts's job),
+ * just needs to be bound so SubmitAnalysisUseCase's DI graph resolves. */
+class FakeHeadCallRateLimiter implements HeadCallRateLimiterPort {
+  async checkAndRecord(): Promise<void> {}
 }
 
 interface Fixture {
@@ -171,6 +189,7 @@ async function buildApp(
       { provide: REPO_SOURCE_PORT, useValue: repoSource },
       { provide: SCORE_REPOSITORY_PORT, useValue: scores },
       { provide: USAGE_QUOTA_PORT, useValue: quota },
+      { provide: HEAD_CALL_RATE_LIMITER_PORT, useValue: new FakeHeadCallRateLimiter() },
       { provide: AnalysisJobRepository, useValue: jobs },
       { provide: AnalysisQueueProducer, useValue: queueProducer },
     ],
@@ -342,6 +361,66 @@ describe("AnalysesController", () => {
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ jobId, status: "failed", cached: false });
       expect(res.body.result).toBeUndefined();
+    });
+
+    it("job failed by a scan timeout -> 504 problem+json /errors/scan-timeout with jobId and timeoutMs", async () => {
+      fixture = await buildApp();
+      const submitRes = await request(fixture.app.getHttpServer()).post("/analyses").send({ repoUrl: REPO_URL });
+      const jobId = submitRes.body.jobId as string;
+
+      // Simulates what AnalysisProcessor's describeError() persists when
+      // RepoAnalysisService.analyze() rejects with a ScanTimeoutError (see
+      // libs/jobs/src/analysis-processor.ts).
+      await fixture.jobs.updateStatus(jobId, "failed", {
+        errorCode: "ScanTimeoutError",
+        errorMessage: "Scan did not complete within 300000ms",
+      });
+
+      const res = await request(fixture.app.getHttpServer()).get(`/analyses/${jobId}`);
+
+      expect(res.status).toBe(504);
+      expect(res.headers["content-type"]).toMatch(/application\/problem\+json/);
+      expect(res.body).toMatchObject({
+        type: "/errors/scan-timeout",
+        status: 504,
+        jobId,
+        timeoutMs: 300_000,
+      });
+    });
+
+    it("job failed by a clone timeout -> 504 problem+json /errors/scan-timeout with jobId and timeoutMs", async () => {
+      fixture = await buildApp();
+      const submitRes = await request(fixture.app.getHttpServer()).post("/analyses").send({ repoUrl: REPO_URL });
+      const jobId = submitRes.body.jobId as string;
+
+      await fixture.jobs.updateStatus(jobId, "failed", {
+        errorCode: "CloneTimeoutError",
+        errorMessage: "Clone did not complete within 120000ms",
+      });
+
+      const res = await request(fixture.app.getHttpServer()).get(`/analyses/${jobId}`);
+
+      expect(res.status).toBe(504);
+      expect(res.headers["content-type"]).toMatch(/application\/problem\+json/);
+      expect(res.body).toMatchObject({
+        type: "/errors/scan-timeout",
+        status: 504,
+        jobId,
+        timeoutMs: 120_000,
+      });
+    });
+
+    it("job failed for a non-timeout reason (e.g. below-threshold) -> still 200 status 'failed', unchanged", async () => {
+      fixture = await buildApp();
+      const submitRes = await request(fixture.app.getHttpServer()).post("/analyses").send({ repoUrl: REPO_URL });
+      const jobId = submitRes.body.jobId as string;
+
+      await fixture.jobs.updateStatus(jobId, "failed", { errorCode: "BELOW_THRESHOLD" });
+
+      const res = await request(fixture.app.getHttpServer()).get(`/analyses/${jobId}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ jobId, status: "failed", cached: false });
     });
   });
 });

@@ -74,6 +74,47 @@ export function describeScoreRepositoryContract(makeRepo: () => ScoreRepositoryP
       });
     });
 
+    describe("saveForced (explicit forced re-scan)", () => {
+      it("(a) findCached returns the FRESH data for the key after saveForced", async () => {
+        await repo.save(makeReport({ status: "complete", compositeScore: 50 }));
+
+        await repo.saveForced(makeReport({ status: "complete", compositeScore: 90 }));
+
+        const found = await repo.findCached({
+          repoUrl: "https://github.com/acme/widget",
+          commitSha: "a".repeat(40),
+          engineVersion: "1.0.0",
+        });
+        expect(found?.compositeScore).toBe(90);
+      });
+
+      it("(b) refreshes the existing complete row IN PLACE — the scan id is stable across a forced re-scan", async () => {
+        const original = await repo.save(makeReport({ status: "complete", compositeScore: 50 }));
+
+        const rescanned = await repo.saveForced(makeReport({ status: "complete", compositeScore: 90 }));
+
+        // Same key => same row. A new id here would orphan every historical
+        // analysis_job.repo_scan_id (FK is ON DELETE SET NULL) and break the
+        // "a completed job always has a scan" invariant in
+        // get-analysis-response.ts.
+        expect(rescanned.id).toBe(original.id);
+        expect(rescanned.compositeScore).toBe(90);
+        const found = await repo.findCached({
+          repoUrl: rescanned.repoUrl,
+          commitSha: rescanned.commitSha,
+          engineVersion: rescanned.engineVersion,
+        });
+        expect(found?.id).toBe(original.id);
+      });
+
+      it("(c) behaves as a plain insert when nothing is cached for the key", async () => {
+        const saved = await repo.saveForced(makeReport({ status: "complete" }));
+
+        const found = await repo.findById(saved.id);
+        expect(found?.id).toBe(saved.id);
+      });
+    });
+
     describe("findCached", () => {
       it("returns null when no scan exists for the key", async () => {
         const found = await repo.findCached({

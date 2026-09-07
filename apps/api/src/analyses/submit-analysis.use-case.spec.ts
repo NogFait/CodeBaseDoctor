@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  HeadCallRateLimitExceededError,
   InvalidRepoUrlError,
   QuotaExceededError,
   RepoNotAccessibleError,
   type CategoryScore,
+  type HeadCallRateLimiterPort,
   type IngestionLimits,
   type RepoMetadata,
   type RepoRef,
@@ -47,6 +49,23 @@ class FakeRepoSource implements RepoSourcePort {
   }
 }
 
+/** Configurable HeadCallRateLimiterPort test double (Fix C) — default
+ * allows every attempt, overridable via checkAndRecordImpl to simulate the
+ * limit being exceeded. `order` is optional call-order tracking, same
+ * pattern as FakeJobRepository/FakeQueueProducer below. */
+class FakeHeadCallRateLimiter implements HeadCallRateLimiterPort {
+  checkAndRecordImpl: (actorId: string) => Promise<void> = async () => {};
+  readonly calls: string[] = [];
+
+  constructor(private readonly order?: string[]) {}
+
+  async checkAndRecord(actorId: string): Promise<void> {
+    this.order?.push("headCallRateLimiter.checkAndRecord");
+    this.calls.push(actorId);
+    return this.checkAndRecordImpl(actorId);
+  }
+}
+
 class FakeJobRepository implements JobRepositoryPort {
   readonly createCalls: AnalysisJobCreateInput[] = [];
   readonly attachBullJobIdCalls: { id: string; bullJobId: string }[] = [];
@@ -66,17 +85,15 @@ class FakeJobRepository implements JobRepositoryPort {
   }
 }
 
+type EnqueuePayload = { repoUrl: string; actorId: string; reservationId: string; forceRescan?: boolean };
+
 class FakeQueueProducer implements QueueProducerPort {
-  readonly enqueueCalls: { jobId: string; payload: { repoUrl: string; actorId: string; reservationId: string } }[] =
-    [];
+  readonly enqueueCalls: { jobId: string; payload: EnqueuePayload }[] = [];
   private counter = 0;
 
   constructor(private readonly order?: string[]) {}
 
-  async enqueue(
-    jobId: string,
-    payload: { repoUrl: string; actorId: string; reservationId: string },
-  ): Promise<string> {
+  async enqueue(jobId: string, payload: EnqueuePayload): Promise<string> {
     this.order?.push("queue.enqueue");
     this.enqueueCalls.push({ jobId, payload });
     return `bull-${++this.counter}`;
@@ -109,6 +126,7 @@ function buildUseCase(
     repoSource: FakeRepoSource;
     scores: InMemoryScoreRepository;
     quota: InMemoryQuota;
+    headCallRateLimiter: FakeHeadCallRateLimiter;
     order: string[];
   }> = {},
 ) {
@@ -116,10 +134,11 @@ function buildUseCase(
   const repoSource = overrides.repoSource ?? new FakeRepoSource();
   const scores = overrides.scores ?? new InMemoryScoreRepository();
   const quota = overrides.quota ?? new InMemoryQuota();
+  const headCallRateLimiter = overrides.headCallRateLimiter ?? new FakeHeadCallRateLimiter(order);
   const jobs = new FakeJobRepository(order);
   const queueProducer = new FakeQueueProducer(order);
-  const useCase = new SubmitAnalysisUseCase(repoSource, scores, quota, jobs, queueProducer);
-  return { useCase, repoSource, scores, quota, jobs, queueProducer, order };
+  const useCase = new SubmitAnalysisUseCase(repoSource, scores, quota, headCallRateLimiter, jobs, queueProducer);
+  return { useCase, repoSource, scores, quota, headCallRateLimiter, jobs, queueProducer, order };
 }
 
 async function seedCachedScan(scores: InMemoryScoreRepository, engineVersion: string): Promise<RepoScoreReport> {
@@ -169,7 +188,16 @@ describe("SubmitAnalysisUseCase", () => {
     const result = await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID });
 
     expect(result.outcome).toBe("queued");
-    expect(order).toEqual(["jobs.create", "queue.enqueue", "jobs.attachBullJobId"]);
+    // Fix C added a head-call rate-limiter check ahead of everything else
+    // in the flow (see the dedicated "checks the head-call rate limiter…"
+    // test below for that ordering specifically) — this test's own concern
+    // is unchanged: job creation, THEN enqueue, THEN attach, in that order.
+    expect(order).toEqual([
+      "headCallRateLimiter.checkAndRecord",
+      "jobs.create",
+      "queue.enqueue",
+      "jobs.attachBullJobId",
+    ]);
     expect(jobs.createCalls).toHaveLength(1);
     expect(jobs.createCalls[0]).toMatchObject({
       repoUrl: REPO_URL,
@@ -214,5 +242,93 @@ describe("SubmitAnalysisUseCase", () => {
     expect(result.outcome).toBe("queued");
     expect(jobs.createCalls).toHaveLength(1);
     expect(queueProducer.enqueueCalls).toHaveLength(1);
+  });
+
+  it("forceRescan:true is carried on the ENQUEUED job payload, so the worker skips its own cache check too", async () => {
+    const { useCase, scores, queueProducer } = buildUseCase();
+    await seedCachedScan(scores, useCase.engineVersion);
+
+    await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID, forceRescan: true });
+
+    expect(queueProducer.enqueueCalls).toHaveLength(1);
+    expect(queueProducer.enqueueCalls[0].payload).toMatchObject({ forceRescan: true });
+  });
+
+  it("a normal (non-forced) submission does NOT put forceRescan:true on the enqueued payload", async () => {
+    const { useCase, queueProducer } = buildUseCase();
+
+    await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID });
+
+    expect(queueProducer.enqueueCalls).toHaveLength(1);
+    expect(queueProducer.enqueueCalls[0].payload.forceRescan).toBeFalsy();
+  });
+
+  // --- Fix C: head-call rate limiter (independent of the daily analysis
+  // quota) ---------------------------------------------------------------
+
+  it("checks the head-call rate limiter for actorId, AFTER resolve() and BEFORE head()", async () => {
+    const callOrder: string[] = [];
+    const { useCase, repoSource, headCallRateLimiter } = buildUseCase();
+    const originalResolve = repoSource.resolveImpl;
+    repoSource.resolveImpl = async (url) => {
+      callOrder.push("repoSource.resolve");
+      return originalResolve(url);
+    };
+    const originalHead = repoSource.headImpl;
+    repoSource.headImpl = async (ref) => {
+      callOrder.push("repoSource.head");
+      return originalHead(ref);
+    };
+    headCallRateLimiter.checkAndRecordImpl = async () => {
+      callOrder.push("headCallRateLimiter.checkAndRecord");
+    };
+
+    await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID });
+
+    expect(callOrder).toEqual(["repoSource.resolve", "headCallRateLimiter.checkAndRecord", "repoSource.head"]);
+    expect(headCallRateLimiter.calls).toEqual([ACTOR_ID]);
+  });
+
+  it("head-call rate limit exceeded: propagates HeadCallRateLimitExceededError; head() and quota.consume() are never reached", async () => {
+    const { useCase, repoSource, quota, headCallRateLimiter } = buildUseCase();
+    let headCalls = 0;
+    const originalHead = repoSource.headImpl;
+    repoSource.headImpl = async (ref) => {
+      headCalls += 1;
+      return originalHead(ref);
+    };
+    headCallRateLimiter.checkAndRecordImpl = async (actorId) => {
+      throw new HeadCallRateLimitExceededError(actorId, 20, new Date());
+    };
+
+    await expect(useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID })).rejects.toBeInstanceOf(
+      HeadCallRateLimitExceededError,
+    );
+    expect(headCalls).toBe(0);
+    expect(quota.consumeCalls).toHaveLength(0);
+  });
+
+  it("cache hit: consumes no quota (unchanged by Fix C) — the head-call rate limiter is still checked, but is a separate gate", async () => {
+    const { useCase, scores, quota, headCallRateLimiter } = buildUseCase();
+    await seedCachedScan(scores, useCase.engineVersion);
+
+    const result = await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID });
+
+    expect(result.outcome).toBe("cached");
+    expect(quota.consumeCalls).toHaveLength(0);
+    // The rate limiter itself still runs (it gates head(), not the cache
+    // check) — but this is the pre-existing "cache hit consumes no quota"
+    // guarantee (capability 06), which this fix must never touch.
+    expect(headCallRateLimiter.calls).toEqual([ACTOR_ID]);
+  });
+
+  it("cache hit under exhausted daily quota still succeeds (capability 06) — unaffected by the new, independent rate limiter", async () => {
+    const { useCase, scores, quota } = buildUseCase({ quota: new InMemoryQuota({ limit: 0 }) });
+    await seedCachedScan(scores, useCase.engineVersion);
+
+    const result = await useCase.submit({ repoUrl: REPO_URL, actorId: ACTOR_ID });
+
+    expect(result.outcome).toBe("cached");
+    expect(quota.consumeCalls).toHaveLength(0);
   });
 });

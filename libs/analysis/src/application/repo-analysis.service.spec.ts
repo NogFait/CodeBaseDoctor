@@ -90,6 +90,60 @@ describe("RepoAnalysisService", () => {
     expect(savedCallsAfter).toBe(savedCallsBefore);
   });
 
+  it("(h) forceRescan:true bypasses a populated cache: re-runs every analyzer, consumes quota again, refreshes the cached scan in place (stable id, fresh data)", async () => {
+    const order: string[] = [];
+    const analyzers = allSixAnalyzers().map((s) => trackingAnalyzer(s, order));
+    const { service, scores, quota } = buildService(analyzers);
+
+    const first = await service.analyze({ repoUrl: REPO_URL, actorId: ACTOR_ID, reservationId: RESERVATION_ID });
+    expect(first.status).toBe("complete");
+    expect(quota.consumeCalls).toHaveLength(1);
+    order.length = 0; // forget the first run's analyzer calls
+
+    const second = await service.analyze({
+      repoUrl: REPO_URL,
+      actorId: ACTOR_ID,
+      reservationId: "reservation-2",
+      forceRescan: true,
+    });
+
+    // the analyzers actually re-ran (a cache hit would have run none)
+    expect(order.filter((e) => e.startsWith("analyze:"))).toHaveLength(6);
+    // the forced path is NOT a free cache hit — quota is consumed a 2nd time
+    expect(quota.consumeCalls).toHaveLength(2);
+    // the cached row is refreshed IN PLACE — same id (so historical
+    // analysis_job.repo_scan_id FKs stay valid), fresh analyzer run
+    expect(second.id).toBe(first.id);
+    expect(second.status).toBe("complete");
+    // ...and findCached() for this key now returns that same, refreshed row
+    const cached = await scores.findCached({
+      repoUrl: REPO_URL,
+      commitSha: second.commitSha,
+      engineVersion: second.engineVersion,
+    });
+    expect(cached?.id).toBe(first.id);
+    // exactly one row for the repo — a re-scan did not append a second
+    expect(await scores.listByRepo(REPO_URL, 10)).toHaveLength(1);
+  });
+
+  it("(h) forceRescan:true still respects the below-threshold rule: 3/6 scored refunds quota and never persists", async () => {
+    const { service, scores, quota } = buildService(
+      allSixAnalyzers({ architecture: "fail", documentation: "fail", performance: "fail" }),
+    );
+
+    await expect(
+      service.analyze({
+        repoUrl: REPO_URL,
+        actorId: ACTOR_ID,
+        reservationId: RESERVATION_ID,
+        forceRescan: true,
+      }),
+    ).rejects.toBeInstanceOf(AnalysisBelowThresholdError);
+
+    expect(quota.refundCalls).toEqual([RESERVATION_ID]);
+    expect(await scores.listByRepo(REPO_URL, 10)).toHaveLength(0);
+  });
+
   it("(b) quota is consumed before any analyzer runs (order matters)", async () => {
     const order: string[] = [];
     const quota = new InMemoryQuota();

@@ -1,9 +1,12 @@
 import { HttpException } from "@nestjs/common";
 import {
+  CloneTimeoutError,
+  HeadCallRateLimitExceededError,
   InvalidRepoUrlError,
   QuotaExceededError,
   RepoNotAccessibleError,
   RepoTooLargeError,
+  ScanTimeoutError,
   TooManyFilesError,
 } from "@cbd/analysis";
 
@@ -95,6 +98,39 @@ export function mapErrorToProblem(error: unknown): MappedProblem {
     };
   }
 
+  if (error instanceof HeadCallRateLimitExceededError) {
+    // Fix C — a NEW, independent gate on RepoSourcePort.head() call
+    // frequency, distinct from QuotaExceededError above: that one means
+    // "you're out of your daily 5 free analyses", this one means "you're
+    // hitting the repo-lookup endpoint too fast". Deliberately a DIFFERENT
+    // `type` (never /errors/quota-exceeded) so a frontend/API consumer can
+    // tell the two apart. `retryAfterSeconds()` reused from the
+    // QuotaExceededError branch above — same "seconds until resetsAt"
+    // derivation, just a much shorter window here.
+    return {
+      status: 429,
+      type: "/errors/rate-limited",
+      title: "Too many repo-lookup attempts",
+      extra: { limit: error.limit, resetsAt: error.resetsAt.toISOString() },
+      headers: { "Retry-After": retryAfterSeconds(error.resetsAt) },
+    };
+  }
+
+  if (error instanceof ScanTimeoutError || error instanceof CloneTimeoutError) {
+    // Two distinct ingestion-phase errors (see ports/errors.ts's own doc
+    // comment on why clone-timeout and scan-timeout are separate classes),
+    // deliberately collapsed to the SAME public error type here — same
+    // "internal phase distinction the API consumer doesn't need" pattern
+    // as TooManyFilesError/RepoTooLargeError above. Per spec
+    // `analysis-api`'s RFC 9457 error-type table: 504 /errors/scan-timeout.
+    return {
+      status: 504,
+      type: "/errors/scan-timeout",
+      title: "Scan timed out",
+      extra: { timeoutMs: error.timeoutMs },
+    };
+  }
+
   if (error instanceof HttpException) {
     // Nest's own built-in exceptions (NotFoundException for the unknown-id
     // GET /analyses/:id case, etc.) — not one of the 4 domain error types
@@ -108,4 +144,43 @@ export function mapErrorToProblem(error: unknown): MappedProblem {
   // information than the HTTP status code"). Never leaks internal error
   // details into the response body.
   return { status: 500, type: "about:blank", title: "Internal server error" };
+}
+
+/** Matches the trailing `${timeoutMs}ms` that both ScanTimeoutError's and
+ * CloneTimeoutError's own `Error.message` template embed (see
+ * ports/errors.ts) — the only place the numeric timeout budget survives
+ * once a job has failed, since `AnalysisJobRecord` persists only
+ * `errorCode`/`errorMessage` strings (see describeError() in
+ * libs/jobs/src/analysis-processor.ts), not a dedicated column. */
+const TIMEOUT_MS_PATTERN = /(\d+)ms\b/;
+
+/**
+ * Reconstructs the RFC 9457 problem for a job that failed ASYNCHRONOUSLY
+ * (inside `AnalysisProcessor.process()`, libs/jobs) purely from its
+ * persisted `errorCode`/`errorMessage` columns. Unlike `mapErrorToProblem`
+ * above — which maps a live, synchronously-thrown Error instance (the
+ * `POST /analyses` path) — `GET /analyses/:id` never has that instance; it
+ * only has what `describeError()` wrote onto the job row (`error.name` /
+ * `error.message`). This reconstructs a real `ScanTimeoutError` /
+ * `CloneTimeoutError` from those two strings and funnels it back through
+ * `mapErrorToProblem` so both paths share ONE mapping table.
+ *
+ * Returns `null` for every other failure cause (e.g.
+ * `AnalysisBelowThresholdError`'s `'BELOW_THRESHOLD'` code, or an
+ * unrecognized error) — callers (see get-analysis-response.ts) fall back to
+ * the bare `{jobId, status:'failed', cached:false}` shape for those,
+ * unchanged from before this function existed.
+ */
+export function mapFailedJobToProblem(errorCode: string | null, errorMessage: string | null): MappedProblem | null {
+  if (errorCode !== ScanTimeoutError.name && errorCode !== CloneTimeoutError.name) {
+    return null;
+  }
+
+  const match = errorMessage ? TIMEOUT_MS_PATTERN.exec(errorMessage) : null;
+  if (!match) return null;
+  const timeoutMs = Number(match[1]);
+
+  const reconstructed =
+    errorCode === ScanTimeoutError.name ? new ScanTimeoutError(timeoutMs) : new CloneTimeoutError(timeoutMs);
+  return mapErrorToProblem(reconstructed);
 }
