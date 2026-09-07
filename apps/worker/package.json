@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "main": "src/main.ts",
+  "scripts": {
+    "start:dev": "tsx --tsconfig ../../tsconfig.json --env-file-if-exists=../../.env src/main.ts",
+    "start:watch": "tsx watch --tsconfig ../../tsconfig.json --env-file-if-exists=../../.env src/main.ts"
+  },
   "dependencies": {
     "@cbd/analysis": "workspace:*",
     "@cbd/analyzers": "workspace:*",

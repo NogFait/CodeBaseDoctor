@@ -1,0 +1,9 @@
+# Local dev harness override (auto-merged by `docker compose`).
+# Host port 5432 is already taken by a native Postgres on this machine, so the
+# compose Postgres is published on 5433 instead. `!override` replaces the base
+# `ports` list rather than appending to it (Compose spec >= 2.24).
+# Redis 6379 is free, left as the base defines it. See DEV-HARNESS.md. Not committed.
+services:
+  postgres:
+    ports: !override
+      - "5433:5432"
