@@ -95,16 +95,31 @@ container (baked defaults), never on the host.
 - `STUB_JUDGE_FAIL_CATEGORIES` env (comma-separated) **or** `new StubJudgeAdapter({ failCategories })`
   → `judge()` throws for those categories (drives the `completed_partial` report state).
 
-`libs/llm/src/llm.module.ts` selection (one-liner factory):
+`libs/llm/src/llm.module.ts` selection (env-injectable factory):
 
 ```ts
-// stub when LLM_JUDGE=stub, OR when neither LLM_JUDGE nor ANTHROPIC_API_KEY is set; else Anthropic
-function selectJudge(): LLMJudgePort {
-  const mode = process.env.LLM_JUDGE?.trim().toLowerCase();
-  if (mode === "stub" || (mode === undefined && !process.env.ANTHROPIC_API_KEY)) return new StubJudgeAdapter();
-  return new AnthropicJudgeAdapter();
+export function selectJudge(env: NodeJS.ProcessEnv = process.env): LLMJudgePort {
+  const mode = env.LLM_JUDGE?.trim().toLowerCase();
+
+  if (mode === "stub") { /* warn: scores are fabricated */ return new StubJudgeAdapter(); }
+  if (mode === "anthropic" || env.ANTHROPIC_API_KEY) return new AnthropicJudgeAdapter();
+
+  // LLM_JUDGE unset/unrecognised AND no ANTHROPIC_API_KEY:
+  if (env.NODE_ENV === "production") {
+    throw new Error("[cbd-llm] Refusing to start: no LLM_JUDGE and no ANTHROPIC_API_KEY …");
+  }
+  // non-production: loud warn + fall back to the stub
+  return new StubJudgeAdapter();
 }
 ```
+
+| `LLM_JUDGE` | `ANTHROPIC_API_KEY` | `NODE_ENV`      | Result                                   |
+|-------------|---------------------|----------------|------------------------------------------|
+| `stub`      | any                 | any            | `StubJudgeAdapter` + warn (opt-in)       |
+| `anthropic` | any                 | any            | `AnthropicJudgeAdapter`                  |
+| unset/other | present             | any            | `AnthropicJudgeAdapter`                  |
+| unset/other | absent              | `!= production`| `StubJudgeAdapter` + loud fallback warn  |
+| unset/other | absent              | `== production`| **throws at factory time** (fail-fast)   |
 
 `ScriptedJudge` and its spec are untouched. Only `architecture` and `documentation` route through
 the judge; the other four categories are computed by deterministic analyzers (Semgrep/OSV, file
