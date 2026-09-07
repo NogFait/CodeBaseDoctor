@@ -50,8 +50,11 @@ export function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-        <header className="mb-8 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">CodeBase Doctor</h1>
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+          <div className="flex items-center gap-2">
+            <img src="/logo-mark.png" alt="" className="h-7 w-7 sm:h-8 sm:w-8" />
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">CodeBase Doctor IA</h1>
+          </div>
           <div className="flex items-center gap-4">
             {typeof quotaRemaining === "number" && (
               <p className="text-sm font-medium text-slate-500">

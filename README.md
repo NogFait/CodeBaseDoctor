@@ -1,14 +1,14 @@
-# CodeBase Doctor
+# CodeBase Doctor IA
 
 **Pasale la URL de un repositorio público de GitHub. Te devuelve un puntaje de 0 a 100 en seis dimensiones de ingeniería — cada una con una explicación escrita y una etiqueta de confianza.**
 
-![Reporte completo — seis dimensiones, puntaje compuesto, pills de confianza](docs/img/phase7-report.png)
+![CodeBase Doctor IA — Analiza · Diagnostica · Mejora](docs/img/hero.png)
 
 ---
 
 ## Qué hace
 
-CodeBase Doctor hace un shallow-clone de un repo público de GitHub dentro de un sandbox descartable y aislado de red, y corre seis analizadores independientes sobre él:
+CodeBase Doctor IA hace un shallow-clone de un repo público de GitHub dentro de un sandbox descartable y aislado de red, y corre seis analizadores independientes sobre él:
 
 | Dimensión | Cómo se puntúa | Etiqueta de confianza | Peso |
 | --- | --- | --- | --- |
