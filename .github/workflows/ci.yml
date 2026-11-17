@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Una corrida por rama: un push nuevo cancela la anterior (los E2E son lentos).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Se llama a prisma directo: el script `prisma:generate` del paquete carga
+      # ../../.env con dotenv-cli, y en CI no hay .env.
+      - name: Generar el cliente de Prisma
+        run: pnpm --filter @cbd/persistence exec prisma generate --schema prisma/schema.prisma
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Los tests de integración y E2E levantan estas imágenes de verdad
+      # (ShallowCloneAdapter las busca como `cbd-*:local`).
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Construir cbd-fetcher
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/docker/cbd-fetcher.Dockerfile
+          tags: cbd-fetcher:local
+          load: true
+          cache-from: type=gha,scope=cbd-fetcher
+          cache-to: type=gha,scope=cbd-fetcher,mode=max
+
+      - name: Construir cbd-scanner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/docker/cbd-scanner.Dockerfile
+          tags: cbd-scanner:local
+          load: true
+          cache-from: type=gha,scope=cbd-scanner
+          cache-to: type=gha,scope=cbd-scanner,mode=max
+
+      # Testcontainers levanta Postgres y Redis reales; el runner ya trae Docker.
+      - name: Tests
+        run: pnpm test
