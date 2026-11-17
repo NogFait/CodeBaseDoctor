@@ -165,7 +165,7 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 | **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
 | **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
 | **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
-| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 403 tests / 67 archivos |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 431 tests / 69 archivos |
 | **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
 
 ---
@@ -238,14 +238,27 @@ curl -s -XPOST localhost:3000/analyses -H 'content-type: application/json' \
 
 Mirá [`DEV-HARNESS.md`](DEV-HARNESS.md) para los detalles que muerden: por qué `start:dev` tiene que apuntar tsx al `tsconfig.json` **raíz**, cómo matar árboles de procesos huérfanos, y los arreglos de conflicto de puertos.
 
-Para usar el juez LLM **real**, dejá `LLM_JUDGE` sin setear (o poné `LLM_JUDGE=anthropic`) y provee `ANTHROPIC_API_KEY`. En `NODE_ENV=production` la app **falla rápido al arrancar** si no hay un LLM real configurado — no va a servir puntajes fabricados en silencio.
+### Juez LLM real y gratuito
+
+Para juzgar con un LLM real **sin pagar**, usá el adaptador OpenAI-compatible (`LLM_JUDGE=openai`). Cualquiera de estos proveedores tiene tier gratis o corre local:
+
+| Proveedor | `LLM_BASE_URL` | `LLM_MODEL` de ejemplo | `LLM_API_KEY` |
+| --- | --- | --- | --- |
+| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | key gratis de console.groq.com |
+| **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` | key gratis de Google AI Studio |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | un modelo con sufijo `:free` | key de openrouter.ai |
+| **Ollama** (local) | `http://localhost:11434/v1` | `llama3.2` | no hace falta |
+
+Los tiers gratis tienen límites de requests por minuto/día; si se pasan, el proveedor responde `429` y esa categoría queda "no puntuada" (el scan sigue como `partial`). Los nombres de modelo cambian seguido: verificalos en la doc del proveedor.
+
+Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_KEY`. En `NODE_ENV=production` la app **falla rápido al arrancar** si no hay un LLM real configurado — no va a servir puntajes fabricados en silencio.
 
 ---
 
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 67 archivos de test / 403 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 69 archivos de test / 431 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```
@@ -268,8 +281,14 @@ Toda la configuración del lado del host son variables de entorno; ver `.env.exa
 | `REDIS_PORT` | Puerto de Redis | `6379` |
 | `PORT` | Puerto HTTP de `apps/api` | `3000` |
 | `UPGRADE_URL` | Link que aparece en el body del problem `quota-exceeded` | `https://codebasedoctor.dev/pricing` |
-| `LLM_JUDGE` | `stub` (gratis, offline, determinista) o `anthropic` (real, pago) | `stub` |
+| `LLM_JUDGE` | `stub` (gratis, offline, determinista), `openai` (cualquier endpoint compatible con OpenAI — **tiers gratis**) o `anthropic` (real, pago) | `stub` |
+| `LLM_BASE_URL` | URL base del endpoint OpenAI-compatible. Si está seteada y `LLM_JUDGE` no, se elige `openai` solo | — |
+| `LLM_MODEL` | Modelo a usar con `LLM_JUDGE=openai` (ej. `llama-3.3-70b-versatile`) | — |
+| `LLM_API_KEY` | Key del proveedor OpenAI-compatible (opcional: Ollama local no necesita) | — |
 | `ANTHROPIC_API_KEY` | Key de Anthropic — requerida cuando `LLM_JUDGE=anthropic` o cuando `LLM_JUDGE` está sin setear | — |
+| `ACTOR_SALT_SECRET` | Secreto del salt diario con el que se hashea la IP del cliente (`openssl rand -hex 32`). **Obligatorio en `NODE_ENV=production`**: sin él la API no arranca | — (salt de dev con warning) |
+| `TRUST_PROXY` | Confiar en `X-Forwarded-For`: cantidad de saltos (`1`), `loopback` o una subred. Necesario detrás de un proxy/PaaS; sin esto todos los usuarios comparten una sola cuota. **Opt-in** a propósito (sin proxy real, sería falsificable) | — (desactivado) |
+| `CORS_ORIGINS` | Orígenes permitidos separados por coma (ej. `https://demo.midominio.dev`). Vacío = CORS apagado (mismo origen / proxy de Vite) | — |
 | `STUB_JUDGE_FAIL_CATEGORIES` | Knob sólo-dev: `CategoryId`s separados por coma que el juez stub debe forzar-fallar (dispara el estado de reporte `partial`) | — (ninguna) |
 | `NODE_ENV` | `production` hace que la selección del juez LLM falle rápido cuando no hay un LLM real configurado | `development` |
 
