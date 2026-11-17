@@ -3,7 +3,12 @@ import type { CategoryAnalyzer, CategoryScore, JudgeRequest, LLMJudgePort, RepoC
 const RUBRIC_ID = "documentation-v1";
 const RUBRIC_VERSION = "1.0.0";
 const MAX_OUTPUT_TOKENS = 600;
-const README_CANDIDATES = ["README.md", "README.rst", "README.txt", "README"];
+// Root-level README, any casing (`readme.md`, `Readme.md`, `README.markdown`…).
+// Exact-name matching used to miss every repo that doesn't shout its README,
+// and the judge then scored a documented project as "no README".
+const README_PATTERN = /^readme(\.(md|markdown|rst|txt|adoc))?$/i;
+// Preference when several flavours coexist; "" is the extension-less `README`.
+const README_EXTENSION_PRIORITY = [".md", ".markdown", ".rst", ".txt", ".adoc", ""];
 const README_SAMPLE_CHARS = 4000;
 
 const SYSTEM_PROMPT = [
@@ -22,19 +27,33 @@ interface ReadmeHeuristic {
   excerpt: string;
 }
 
+function extensionRank(path: string): number {
+  const dot = path.indexOf(".");
+  const extension = dot === -1 ? "" : path.slice(dot).toLowerCase();
+  return README_EXTENSION_PRIORITY.indexOf(extension);
+}
+
+/** Best root-level README in `ctx.files`, or null. `glob` is exact-match, so it can't do this. */
+function findReadme(ctx: RepoContext): string | null {
+  const candidates = ctx.files
+    .map((file) => file.path)
+    .filter((path) => !path.includes("/") && README_PATTERN.test(path))
+    .sort((a, b) => extensionRank(a) - extensionRank(b));
+  return candidates[0] ?? null;
+}
+
 async function checkReadme(ctx: RepoContext): Promise<ReadmeHeuristic> {
-  for (const candidate of README_CANDIDATES) {
-    const matches = ctx.glob(candidate);
-    if (matches.length === 0) continue;
-    try {
-      const content = await ctx.readFile(candidate);
-      return { present: true, path: candidate, lengthChars: content.length, excerpt: content.slice(0, README_SAMPLE_CHARS) };
-    } catch {
-      // file too large to read or vanished — still "present" for the heuristic
-      return { present: true, path: candidate, lengthChars: -1, excerpt: "" };
-    }
+  const path = findReadme(ctx);
+  if (path === null) {
+    return { present: false, path: null, lengthChars: 0, excerpt: "" };
   }
-  return { present: false, path: null, lengthChars: 0, excerpt: "" };
+  try {
+    const content = await ctx.readFile(path);
+    return { present: true, path, lengthChars: content.length, excerpt: content.slice(0, README_SAMPLE_CHARS) };
+  } catch {
+    // file too large to read or vanished — still "present" for the heuristic
+    return { present: true, path, lengthChars: -1, excerpt: "" };
+  }
 }
 
 /** Pure-ish (only I/O is the injected ctx.readFile/glob) — builds the
@@ -59,7 +78,9 @@ export function buildDocumentationUserPrompt(heuristic: ReadmeHeuristic): string
 export class DocumentationAnalyzer implements CategoryAnalyzer {
   readonly category = "documentation" as const;
   readonly confidence = "judged" as const;
-  readonly analyzerVersion = "documentation-1.0.0";
+  // 1.0.1: README detection became case-insensitive (scores of repos with a
+  // lowercase readme.md were wrong) — bumping invalidates those cached scans.
+  readonly analyzerVersion = "documentation-1.0.1";
 
   constructor(private readonly judge: LLMJudgePort) {}
 

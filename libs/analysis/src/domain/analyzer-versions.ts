@@ -24,6 +24,6 @@ export const ANALYZER_VERSIONS: Record<CategoryId, string> = {
   testing: "testing-1.0.0",
   maintainability: "maintainability-1.0.0",
   architecture: "architecture-1.0.0",
-  documentation: "documentation-1.0.0",
+  documentation: "documentation-1.0.1",
   performance: "performance-1.0.0",
 };
