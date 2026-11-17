@@ -35,7 +35,7 @@ CodeBase Doctor IA hace un shallow-clone de un repo público de GitHub dentro de
 | --- | --- | --- | --- |
 | **Architecture** | Juez LLM (`LLMJudgePort`) sobre la estructura y el layering del repo | `judged` | 1.0 |
 | **Security** | **Semgrep** + **OSV-Scanner** reales, ejecutados offline dentro del contenedor `cbd-scanner` | `measured` | 1.0 |
-| **Testing** | Heurísticas deterministas — ratio de archivos de test, convenciones de nombres, config de CI | `estimated` | 1.0 |
+| **Testing** | Heurísticas deterministas — archivos de test por archivo fuente (satura en 0.5; reconoce JS/TS, Python, Go, Ruby, Java/Kotlin/C#, PHP y carpetas `test/`), más config de CI. Mide presencia de tests, no cobertura | `estimated` | 1.0 |
 | **Maintainability** | Heurística determinista — proporción de archivos fuente sobredimensionados | `measured` | 1.0 |
 | **Performance** | Escaneo estático de patrones heurísticos | `estimated` | **0.5** |
 | **Documentation** | Pre-chequeo de presencia de README que alimenta a un juez LLM | `judged` | 1.0 |
@@ -165,7 +165,7 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 | **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
 | **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
 | **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
-| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 431 tests / 69 archivos |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 484 tests / 69 archivos |
 | **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
 
 ---
@@ -258,7 +258,7 @@ Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_K
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 69 archivos de test / 431 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 69 archivos de test / 484 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```
