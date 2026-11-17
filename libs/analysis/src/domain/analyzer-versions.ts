@@ -20,7 +20,7 @@ import type { CategoryId } from "./types";
  * so its test instantiates them and asserts they match this object exactly.
  */
 export const ANALYZER_VERSIONS: Record<CategoryId, string> = {
-  security: "security-1.0.0",
+  security: "security-1.0.1",
   testing: "testing-1.1.0",
   maintainability: "maintainability-1.0.0",
   architecture: "architecture-1.0.0",

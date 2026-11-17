@@ -29,7 +29,9 @@ function toDomainFinding(f: RawScanFinding): Finding {
 export class SecurityAnalyzer implements CategoryAnalyzer {
   readonly category = "security" as const;
   readonly confidence = "measured" as const;
-  readonly analyzerVersion = "security-1.0.0";
+  // 1.0.1: dangerous-eval no longer flags RegExp#exec (it scored a CRITICAL
+  // finding on every JS regex .exec()) — bumping invalidates those scans.
+  readonly analyzerVersion = "security-1.0.1";
 
   constructor(private readonly reader: ScanOutputReader = new DefaultScanOutputReader()) {}
 

@@ -34,13 +34,23 @@ rules:
     languages: [generic]
     severity: ERROR
     message: >-
-      Use of eval()/exec() on what may be dynamic or user-controlled input.
-      This can lead to arbitrary code execution — avoid eval/exec entirely,
-      or parse the input with a safe, purpose-built parser instead.
+      Use of eval()/exec() (or child_process.exec) on what may be dynamic or
+      user-controlled input. This can lead to arbitrary code execution —
+      avoid eval/exec entirely, or parse the input with a safe,
+      purpose-built parser instead.
     metadata:
       cbd-severity: critical
+    # Two alternatives:
+    #  1. a BARE `eval(` / `exec(` call — the negative lookbehind rejects any
+    #     member call (`regex.exec(`, `re.exec(`, `/x/g.exec(`, `redis.eval(`),
+    #     because `RegExp#exec` is pattern matching, not code execution. The
+    #     old `\b(eval|exec)\s*\(` flagged every JS regex `.exec()` as
+    #     CRITICAL (tj/commander.js dropped to 60 for one).
+    #  2. Node's `child_process.exec` / `execSync` (and the usual aliases),
+    #     which ARE a real shell-injection vector and would otherwise be lost
+    #     by excluding member calls.
     patterns:
-      - pattern-regex: '\b(eval|exec)\s*\('
+      - pattern-regex: '(?<![.\w$])(?:eval|exec)\s*\(|\b(?:child_process|childProcess|cp)\.exec(?:Sync)?\s*\('
 
   - id: sql-string-concatenation
     languages: [generic]
