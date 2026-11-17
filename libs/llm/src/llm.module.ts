@@ -1,6 +1,7 @@
 import { Global, Module } from "@nestjs/common";
 import { LLM_JUDGE_PORT, type LLMJudgePort } from "@cbd/analysis";
 import { AnthropicJudgeAdapter } from "./anthropic-judge-adapter";
+import { OpenAICompatibleJudgeAdapter } from "./openai-compatible-judge-adapter";
 import { StubJudgeAdapter } from "./stub-judge-adapter";
 
 /**
@@ -11,6 +12,8 @@ import { StubJudgeAdapter } from "./stub-judge-adapter";
  * | LLM_JUDGE   | ANTHROPIC_API_KEY | NODE_ENV        | Result
  * |-------------|-------------------|-----------------|------------------------------------------
  * | "stub"      | any               | any             | StubJudgeAdapter + warn (explicit opt-in)
+ * | "openai"    | n/a (LLM_API_KEY) | any             | OpenAICompatibleJudgeAdapter (needs LLM_BASE_URL + LLM_MODEL; free tiers)
+ * | unset       | n/a               | any             | OpenAICompatibleJudgeAdapter when LLM_BASE_URL is set
  * | "anthropic" | any               | any             | AnthropicJudgeAdapter (key resolved lazily by the SDK)
  * | unset/other | present           | any             | AnthropicJudgeAdapter (unchanged)
  * | unset/other | absent            | != "production" | StubJudgeAdapter + a loud fallback warn
@@ -34,6 +37,24 @@ export function selectJudge(env: NodeJS.ProcessEnv = process.env): LLMJudgePort 
         "LLM_JUDGE and set ANTHROPIC_API_KEY for real judging.",
     );
     return new StubJudgeAdapter();
+  }
+
+  // Free-tier path: any OpenAI-compatible endpoint (Groq, Gemini, OpenRouter,
+  // Ollama). Selected explicitly, or implicitly by LLM_BASE_URL being present
+  // (so a production deploy on a free provider does not trip the fail-fast
+  // below). Missing base URL / model is a hard misconfiguration in any env.
+  if (mode === "openai" || (!mode && env.LLM_BASE_URL)) {
+    if (!env.LLM_BASE_URL) {
+      throw new Error("[cbd-llm] LLM_JUDGE=openai requires LLM_BASE_URL (e.g. https://api.groq.com/openai/v1).");
+    }
+    if (!env.LLM_MODEL) {
+      throw new Error("[cbd-llm] LLM_JUDGE=openai requires LLM_MODEL (e.g. llama-3.3-70b-versatile).");
+    }
+    return new OpenAICompatibleJudgeAdapter({
+      baseUrl: env.LLM_BASE_URL,
+      modelId: env.LLM_MODEL,
+      apiKey: env.LLM_API_KEY || undefined,
+    });
   }
 
   if (mode === "anthropic" || env.ANTHROPIC_API_KEY) {

@@ -5,6 +5,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { LLM_JUDGE_PORT, type JudgeRequest, type LLMJudgePort } from "@cbd/analysis";
 import { ScriptedJudge } from "../testing/scripted-judge";
 import { AnthropicJudgeAdapter } from "./anthropic-judge-adapter";
+import { OpenAICompatibleJudgeAdapter } from "./openai-compatible-judge-adapter";
 import { StubJudgeAdapter } from "./stub-judge-adapter";
 import { selectJudge } from "./llm.module";
 
@@ -164,6 +165,46 @@ describe("selectJudge (env-driven LLM judge binding)", () => {
   it("LLM_JUDGE unset + no key + NODE_ENV=production -> THROWS at factory time, naming both env vars (fail-fast, no fake scores in prod)", () => {
     expect(() => selectJudge({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/LLM_JUDGE/);
     expect(() => selectJudge({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/ANTHROPIC_API_KEY/);
+  });
+
+  it("LLM_JUDGE=openai -> OpenAICompatibleJudgeAdapter (free providers: Groq, Gemini compat, OpenRouter, Ollama), silently", () => {
+    const judge = selectJudge({
+      LLM_JUDGE: "openai",
+      LLM_BASE_URL: "https://api.groq.com/openai/v1",
+      LLM_MODEL: "llama-3.3-70b-versatile",
+      LLM_API_KEY: "gsk_test",
+    } as NodeJS.ProcessEnv);
+
+    expect(judge).toBeInstanceOf(OpenAICompatibleJudgeAdapter);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("LLM_JUDGE=openai without an API key is allowed (local Ollama needs none)", () => {
+    const judge = selectJudge({
+      LLM_JUDGE: "openai",
+      LLM_BASE_URL: "http://localhost:11434/v1",
+      LLM_MODEL: "llama3.2",
+    } as NodeJS.ProcessEnv);
+
+    expect(judge).toBeInstanceOf(OpenAICompatibleJudgeAdapter);
+  });
+
+  it("LLM_JUDGE=openai missing LLM_BASE_URL or LLM_MODEL throws, naming the missing var (misconfig, in any NODE_ENV)", () => {
+    expect(() => selectJudge({ LLM_JUDGE: "openai", LLM_MODEL: "m" } as NodeJS.ProcessEnv)).toThrow(/LLM_BASE_URL/);
+    expect(() =>
+      selectJudge({ LLM_JUDGE: "openai", LLM_BASE_URL: "http://x/v1" } as NodeJS.ProcessEnv),
+    ).toThrow(/LLM_MODEL/);
+  });
+
+  it("LLM_JUDGE unset + LLM_BASE_URL present -> OpenAICompatibleJudgeAdapter (so prod does not fail-fast on a free-tier setup)", () => {
+    const judge = selectJudge({
+      NODE_ENV: "production",
+      LLM_BASE_URL: "https://api.groq.com/openai/v1",
+      LLM_MODEL: "llama-3.3-70b-versatile",
+      LLM_API_KEY: "gsk_test",
+    } as NodeJS.ProcessEnv);
+
+    expect(judge).toBeInstanceOf(OpenAICompatibleJudgeAdapter);
   });
 
   it("an unrecognised LLM_JUDGE value with no key behaves like unset: warn+stub in dev, throw in prod", () => {
