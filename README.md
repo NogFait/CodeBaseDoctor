@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/NogFait/CodeBaseDoctor/actions/workflows/ci.yml"><img src="https://github.com/NogFait/CodeBaseDoctor/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-MIT-green?style=flat-square" alt="Licencia MIT"></a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/NestJS-E0234E?style=flat-square&logo=nestjs&logoColor=white" alt="NestJS">
   <img src="https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB" alt="React">
@@ -353,4 +358,4 @@ Base URL en desarrollo local: `http://localhost:3000`.
 
 ## Licencia
 
-Licencia: a definir — todavía no hay archivo `LICENSE` en el repositorio.
+[MIT](LICENSE) © 2026 NogFait.
