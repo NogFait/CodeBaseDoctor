@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: cbd
       POSTGRES_DB: codebase_doctor
     ports:
-      - "5432:5432"
+      # Solo loopback: sin esto Docker publica en 0.0.0.0 (y se salta ufw).
+      - "127.0.0.1:5432:5432"
     volumes:
       - cbd-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +23,8 @@ services:
     container_name: cbd-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Solo loopback: Redis no tiene contraseña, nunca debe quedar expuesto.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
