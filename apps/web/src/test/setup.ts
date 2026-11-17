@@ -11,6 +11,34 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+// Node >= 25 ships an experimental global `localStorage` that is `undefined`
+// unless `--localstorage-file` is passed, and it shadows jsdom's own Storage
+// on `globalThis`. Real browsers are unaffected — this is a test-env quirk —
+// so restore a working Storage here (jsdom's if reachable, else in-memory).
+if (typeof globalThis.localStorage?.getItem !== "function") {
+  const fromJsdom = typeof window !== "undefined" ? Object.getOwnPropertyDescriptor(window, "localStorage") : undefined;
+  let storage: Storage | undefined;
+  try {
+    storage = fromJsdom?.get ? (fromJsdom.get.call(window) as Storage) : undefined;
+  } catch {
+    storage = undefined;
+  }
+  if (typeof storage?.getItem !== "function") {
+    const data = new Map<string, string>();
+    storage = {
+      get length() {
+        return data.size;
+      },
+      clear: () => data.clear(),
+      getItem: (key: string) => data.get(key) ?? null,
+      key: (index: number) => [...data.keys()][index] ?? null,
+      removeItem: (key: string) => void data.delete(key),
+      setItem: (key: string, value: string) => void data.set(key, String(value)),
+    } as Storage;
+  }
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+}
+
 // Extends vitest's `expect` with jest-dom matchers (toBeInTheDocument, etc.)
 // AND augments vitest's `Assertion` type with them — the `/vitest` subpath
 // does both, unlike importing "@testing-library/jest-dom/matchers" +
