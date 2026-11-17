@@ -21,7 +21,7 @@ import type { CategoryId } from "./types";
  */
 export const ANALYZER_VERSIONS: Record<CategoryId, string> = {
   security: "security-1.0.0",
-  testing: "testing-1.0.0",
+  testing: "testing-1.1.0",
   maintainability: "maintainability-1.0.0",
   architecture: "architecture-1.0.0",
   documentation: "documentation-1.0.1",
