@@ -244,12 +244,12 @@ Para juzgar con un LLM real **sin pagar**, usá el adaptador OpenAI-compatible (
 
 | Proveedor | `LLM_BASE_URL` | `LLM_MODEL` de ejemplo | `LLM_API_KEY` |
 | --- | --- | --- | --- |
-| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | key gratis de console.groq.com |
+| **Groq** ✅ | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` | key gratis de console.groq.com |
 | **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` | key gratis de Google AI Studio |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | un modelo con sufijo `:free` | key de openrouter.ai |
 | **Ollama** (local) | `http://localhost:11434/v1` | `llama3.2` | no hace falta |
 
-Los tiers gratis tienen límites de requests por minuto/día; si se pasan, el proveedor responde `429` y esa categoría queda "no puntuada" (el scan sigue como `partial`). Los nombres de modelo cambian seguido: verificalos en la doc del proveedor.
+Los tiers gratis tienen límites de requests por minuto/día; si se pasan, el proveedor responde `429` y esa categoría queda "no puntuada" (el scan sigue como `partial`). Los nombres de modelo cambian seguido (`llama-3.3-70b-versatile` ya no existe en Groq): consultá los disponibles con `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $LLM_API_KEY"`. ✅ = probado contra el proveedor real; el resto de la tabla es compatible por protocolo pero no lo probé.
 
 Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_KEY`. En `NODE_ENV=production` la app **falla rápido al arrancar** si no hay un LLM real configurado — no va a servir puntajes fabricados en silencio.
 
@@ -283,7 +283,7 @@ Toda la configuración del lado del host son variables de entorno; ver `.env.exa
 | `UPGRADE_URL` | Link que aparece en el body del problem `quota-exceeded` | `https://codebasedoctor.dev/pricing` |
 | `LLM_JUDGE` | `stub` (gratis, offline, determinista), `openai` (cualquier endpoint compatible con OpenAI — **tiers gratis**) o `anthropic` (real, pago) | `stub` |
 | `LLM_BASE_URL` | URL base del endpoint OpenAI-compatible. Si está seteada y `LLM_JUDGE` no, se elige `openai` solo | — |
-| `LLM_MODEL` | Modelo a usar con `LLM_JUDGE=openai` (ej. `llama-3.3-70b-versatile`) | — |
+| `LLM_MODEL` | Modelo a usar con `LLM_JUDGE=openai` (ej. `openai/gpt-oss-120b`) | — |
 | `LLM_API_KEY` | Key del proveedor OpenAI-compatible (opcional: Ollama local no necesita) | — |
 | `ANTHROPIC_API_KEY` | Key de Anthropic — requerida cuando `LLM_JUDGE=anthropic` o cuando `LLM_JUDGE` está sin setear | — |
 | `ACTOR_SALT_SECRET` | Secreto del salt diario con el que se hashea la IP del cliente (`openssl rand -hex 32`). **Obligatorio en `NODE_ENV=production`**: sin él la API no arranca | — (salt de dev con warning) |
