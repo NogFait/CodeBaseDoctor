@@ -170,7 +170,7 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 | **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
 | **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
 | **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
-| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 484 tests / 69 archivos |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 485 tests / 69 archivos |
 | **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
 
 ---
@@ -208,8 +208,9 @@ El camino por defecto usa un **stub de LLM gratis y offline** (`LLM_JUDGE=stub`)
 - **Docker** + `docker compose`, con un socket de Docker funcionando.
 - Las dos imágenes del sandbox construidas y presentes localmente:
   ```bash
-  docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local .
-  docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local .
+  # el contexto es apps/worker/docker (los COPY del Dockerfile son relativos a esa carpeta)
+  docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local apps/worker/docker
+  docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local apps/worker/docker
   ```
 
 ### Pasos
@@ -263,7 +264,7 @@ Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_K
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 69 archivos de test / 484 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 69 archivos de test / 485 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```

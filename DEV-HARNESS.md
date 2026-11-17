@@ -14,8 +14,9 @@ exactly that.
 - Docker images **`cbd-fetcher:local`** and **`cbd-scanner:local`** built and present
   (`docker images | grep cbd-`). If missing:
   ```bash
-  docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local .
-  docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local .
+  # build context is apps/worker/docker (the Dockerfile's COPY paths are relative to it)
+  docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local apps/worker/docker
+  docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local apps/worker/docker
   ```
 
 ## 1. One-time setup added by this harness
