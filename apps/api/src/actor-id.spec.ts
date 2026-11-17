@@ -60,4 +60,14 @@ describe("resolveActorSaltSecret", () => {
     expect(warn.mock.calls[0][0]).toMatch(/ACTOR_SALT_SECRET/);
     warn.mockRestore();
   });
+
+  it("THROWS in production when unset — a well-known salt would make actorIds guessable", () => {
+    expect(() => resolveActorSaltSecret({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/ACTOR_SALT_SECRET/);
+  });
+
+  it("still returns the real secret in production when it is set", () => {
+    expect(
+      resolveActorSaltSecret({ NODE_ENV: "production", ACTOR_SALT_SECRET: "prod-secret-value" } as NodeJS.ProcessEnv),
+    ).toBe("prod-secret-value");
+  });
 });

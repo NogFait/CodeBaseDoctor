@@ -16,11 +16,10 @@ interface JobLookupPort {
 }
 
 function getClientIp(req: Request): string {
-  // No proxy-trust config exists anywhere in this app (checked: no
-  // `app.set('trust proxy', ...)`, no @nestjs/config, nothing) so `req.ip`
-  // is Express's direct socket address — X-Forwarded-For is deliberately
-  // NOT honored here; trusting it without an actual reverse-proxy trust
-  // boundary would let a client spoof its own actorId trivially.
+  // `req.ip` is Express's direct socket address unless `TRUST_PROXY` is set
+  // (see http-config.ts) — X-Forwarded-For is deliberately NOT honored by
+  // default; trusting it without a real reverse-proxy trust boundary would
+  // let a client spoof its own actorId trivially.
   return req.ip ?? req.socket.remoteAddress ?? "unknown";
 }
 

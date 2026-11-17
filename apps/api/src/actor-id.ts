@@ -48,6 +48,15 @@ export function resolveActorSaltSecret(env: NodeJS.ProcessEnv = process.env): st
   const secret = env.ACTOR_SALT_SECRET;
   if (secret) return secret;
 
+  // In production a well-known salt makes every actorId computable by anyone
+  // who knows a client IP — fail fast at boot, like the LLM judge selection.
+  if (env.NODE_ENV === "production") {
+    throw new Error(
+      "[cbd-api] Refusing to start: ACTOR_SALT_SECRET is not set. Generate one " +
+        "(e.g. `openssl rand -hex 32`) and set it in the production environment.",
+    );
+  }
+
   // eslint-disable-next-line no-console
   console.warn(
     "[cbd-api] ACTOR_SALT_SECRET is not set. Falling back to a well-known, " +

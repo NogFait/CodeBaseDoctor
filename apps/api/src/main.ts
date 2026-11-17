@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { ApiModule } from "./api.module";
 import { ProblemDetailsFilter } from "./errors/problem-details.filter";
+import { configureHttp } from "./http-config";
 
 // apps/api serves HTTP (unlike apps/worker, which is headless — see
 // worker/src/main.ts). The RFC 9457 filter (task 5.3) is wired here, once,
@@ -13,6 +14,7 @@ import { ProblemDetailsFilter } from "./errors/problem-details.filter";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(ApiModule);
   app.useGlobalFilters(new ProblemDetailsFilter());
+  configureHttp(app);
   await app.listen(process.env.PORT ?? 3000);
 }
 
