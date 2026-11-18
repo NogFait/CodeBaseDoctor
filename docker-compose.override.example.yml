@@ -1,0 +1,17 @@
+# Copiá este archivo a `docker-compose.override.yml` SOLO si el puerto 5432 de tu máquina ya está ocupado
+# (por ejemplo, un Postgres instalado de forma nativa):
+#
+#   cp docker-compose.override.example.yml docker-compose.override.yml
+#
+# `docker compose` lo combina solo con docker-compose.yml y publica el Postgres del proyecto en el
+# puerto 5433 en lugar del 5432. Después cambiá el puerto en tu `.env`:
+#
+#   DATABASE_URL=postgresql://cbd:cbd@localhost:5433/codebase_doctor
+#
+# `!override` reemplaza la lista de puertos del compose base en lugar de sumarse a ella
+# (hace falta Docker Compose >= 2.24). Se mantiene el `127.0.0.1` a propósito: sin él, Docker
+# publicaría el puerto en todas las interfaces de la máquina.
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5433:5432"

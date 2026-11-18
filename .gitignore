@@ -12,5 +12,8 @@ coverage/
 .env
 .env.local
 
+# override local del compose (ver docker-compose.override.example.yml)
+docker-compose.override.yml
+
 # editors / OS
 .DS_Store

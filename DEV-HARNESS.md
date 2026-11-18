@@ -27,7 +27,7 @@ exactly that.
 | `apps/api/package.json` + `apps/worker/package.json` → `scripts.start:dev` / `start:watch` | no npm scripts existed |
 | `libs/llm/src/stub-judge-adapter.ts` (+ spec) | free, deterministic, offline `LLMJudgePort` — the only new production code |
 | `libs/llm/src/llm.module.ts` | factory now picks stub vs. Anthropic from env |
-| `docker-compose.override.yml` | remaps Postgres to host **5433** (native Postgres already owns 5432 here) |
+| `docker-compose.override.yml` | remaps Postgres to host **5433** (native Postgres already owns 5432 here). Local and git-ignored since the README guide was rewritten; the tracked template is `docker-compose.override.example.yml` |
 | `.env` / `.env.example` | **could not be written by the agent** (permission policy blocks `.env*`). Create manually — see §2. |
 
 ### The `start:dev` script

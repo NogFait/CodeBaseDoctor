@@ -4,6 +4,12 @@
   "private": true,
   "description": "CodeBase Doctor - analyzes a GitHub repo and scores it across 6 dimensions",
   "scripts": {
+    "docker:build": "docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local apps/worker/docker && docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local apps/worker/docker",
+    "db:generate": "pnpm --filter @cbd/persistence prisma:generate",
+    "db:migrate": "pnpm --filter @cbd/persistence prisma:migrate",
+    "dev:api": "pnpm --filter @cbd/api start:dev",
+    "dev:worker": "pnpm --filter @cbd/worker start:dev",
+    "dev:web": "pnpm --filter @cbd/web dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p apps/web/tsconfig.json"
