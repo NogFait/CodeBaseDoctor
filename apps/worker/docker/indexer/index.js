@@ -110,12 +110,27 @@ const SEMGREP_CONFIG = process.env.CBD_SEMGREP_CONFIG || "/opt/semgrep-rules";
 // this only matters if a rule is added later without one).
 const SEMGREP_SEVERITY_FALLBACK = { ERROR: "high", WARNING: "medium", INFO: "low" };
 
+// `--disable-version-check` is load-bearing for speed: this container runs with
+// `--network none`, and without the flag Semgrep tries to reach semgrep.dev for
+// a version check and sits on the timeout (~45s, measured: 46s vs 2s) on EVERY
+// scan — nearly the whole cost of a scan. It can never succeed here anyway.
+function buildSemgrepArgs(root) {
+  return [
+    "--config", SEMGREP_CONFIG,
+    "--json",
+    "--metrics=off",
+    "--disable-version-check",
+    "--timeout", "120",
+    root,
+  ];
+}
+
 function runSemgrep(root) {
   let raw;
   try {
     raw = execFileSync(
       SEMGREP_BIN,
-      ["--config", SEMGREP_CONFIG, "--json", "--metrics=off", "--timeout", "120", root],
+      buildSemgrepArgs(root),
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 150_000 },
     );
   } catch (err) {
@@ -210,6 +225,14 @@ function primeOsvOfflineDb() {
   }
 }
 
+// osv-scanner exits 128 with "No package sources found" when the repo has no
+// lockfile/manifest it understands (e.g. a library that doesn't commit one).
+// That is the NORMAL "nothing to scan" outcome, not a failed scan — treating it
+// as a failure made every dependency-free repo log a bogus "scanner degraded".
+function isNoPackageSourcesError(err) {
+  return Boolean(err) && err.status === 128;
+}
+
 function runOsvScanner(root) {
   primeOsvOfflineDb();
 
@@ -221,6 +244,8 @@ function runOsvScanner(root) {
       { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 150_000 },
     );
   } catch (err) {
+    if (isNoPackageSourcesError(err)) return [];
+
     // osv-scanner's own documented exit-code convention (verified directly
     // against the real 1.9.1 binary): 0 = no vulnerabilities found, 1 =
     // vulnerabilities WERE found — that is success, not a crash.
@@ -288,4 +313,10 @@ function main() {
   process.stdout.write(JSON.stringify(output));
 }
 
-main();
+// Run as a script inside the scanner image; `require()`-ing it (the unit spec in
+// apps/worker/src/indexer.spec.ts) only loads the helpers below.
+if (require.main === module) {
+  main();
+}
+
+module.exports = { buildSemgrepArgs, isNoPackageSourcesError };
