@@ -91,16 +91,28 @@ describe("RedisHeadCallRateLimiterAdapter (Testcontainers Redis)", () => {
   });
 
   it("a new window resets the count — an actor blocked in one window is allowed again once the window rolls over", async () => {
-    // A short window (50ms) lets this test actually observe the rollover
-    // without a long sleep.
-    const adapter = new RedisHeadCallRateLimiterAdapter(redis, { limit: 1, windowMs: 50 });
+    // The window bucket is `floor(Date.now() / windowMs)`, so this test pins
+    // `Date.now` instead of racing the real clock. It used to use a 50ms
+    // window and real sleeps, which was flaky: two Redis round trips on a
+    // loaded machine can straddle a 50ms boundary, landing the "blocked" call
+    // in a NEW window (it then resolved instead of rejecting). The window is
+    // also long, so the key's real Redis TTL can't expire mid-test.
+    const WINDOW_MS = 5_000;
+    const adapter = new RedisHeadCallRateLimiterAdapter(redis, { limit: 1, windowMs: WINDOW_MS });
     const actorId = randomUUID();
+    const windowStart = 1_000 * WINDOW_MS; // aligned to a bucket boundary
+    const now = vi.spyOn(Date, "now");
 
-    await adapter.checkAndRecord(actorId);
-    await expect(adapter.checkAndRecord(actorId)).rejects.toBeInstanceOf(HeadCallRateLimitExceededError);
+    try {
+      now.mockReturnValue(windowStart + 10);
+      await adapter.checkAndRecord(actorId);
+      now.mockReturnValue(windowStart + 20); // same window -> over the limit
+      await expect(adapter.checkAndRecord(actorId)).rejects.toBeInstanceOf(HeadCallRateLimitExceededError);
 
-    await new Promise((resolve) => setTimeout(resolve, 120));
-
-    await expect(adapter.checkAndRecord(actorId)).resolves.toBeUndefined();
+      now.mockReturnValue(windowStart + WINDOW_MS + 10); // next window -> count resets
+      await expect(adapter.checkAndRecord(actorId)).resolves.toBeUndefined();
+    } finally {
+      now.mockRestore();
+    }
   });
 });
