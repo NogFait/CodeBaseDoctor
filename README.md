@@ -32,6 +32,16 @@
 
 ---
 
+## Demo
+
+![Demo: se pega la URL de un repo, el progreso por categoría se actualiza en vivo y llega el reporte](docs/img/demo.gif)
+
+Grabado en local analizando [`lukeed/clsx`](https://github.com/lukeed/clsx): se pega la URL, el progreso por categoría se actualiza en vivo y llega el reporte de seis dimensiones, con el selector ES / EN. Architecture y Documentation las juzgó un LLM real (`openai/gpt-oss-120b` en el tier gratuito de Groq); el resto son análisis deterministas (Semgrep y OSV-Scanner reales, más heurísticas).
+
+> **Es un análisis real, pero grabado:** no hay una instancia pública porque el worker necesita acceso a Docker para aislar cada repo y ejecutar el scanner. Para probarlo vos, seguí la [puesta en marcha](#puesta-en-marcha-desarrollo-local) — con el juez `stub` no hace falta ninguna key.
+
+---
+
 ## Qué hace
 
 CodeBase Doctor IA hace un shallow-clone de un repo público de GitHub dentro de un sandbox descartable y aislado de red, y corre seis analizadores independientes sobre él:
