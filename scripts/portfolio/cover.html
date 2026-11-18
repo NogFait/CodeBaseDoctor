@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>CodeBase Doctor IA — portada</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap');
+
+  :root {
+    --navy-950: #060d24;
+    --navy-900: #0a1535;
+    --navy-800: #101f4a;
+    --blue: #2b8cff;
+    --blue-soft: #7db4ff;
+    --ink-soft: #b9c6e6;
+    --ok: #34d399;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1600px; height: 900px; overflow: hidden; }
+  body {
+    font-family: 'Poppins', system-ui, sans-serif;
+    color: #fff;
+    /* color sólido de base: el fondo es oscuro aunque los degradados no carguen */
+    background-color: var(--navy-950);
+    background-image:
+      linear-gradient(160deg, var(--navy-900), var(--navy-950));
+    position: relative;
+  }
+  /* trama de puntos, como en el banner */
+  body::before {
+    content: ''; position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(125, 180, 255, .16) 1.4px, transparent 1.4px);
+    background-size: 28px 28px;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 35%, transparent 70%);
+            mask-image: linear-gradient(90deg, transparent 0%, #000 35%, transparent 70%);
+  }
+
+  .left { position: absolute; left: 96px; top: 96px; width: 640px; }
+  .badge {
+    width: 96px; height: 96px; border-radius: 24px; background: #fff;
+    display: grid; place-items: center;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .6);
+  }
+  .badge img { width: 70px; height: 70px; }
+  h1 { margin-top: 44px; font-weight: 800; font-size: 96px; line-height: 1.02; letter-spacing: -2.5px; }
+  h1 .doctor { color: var(--blue); }
+  .tagline { margin-top: 30px; font-size: 29px; line-height: 1.45; font-weight: 500; color: var(--ink-soft); max-width: 600px; }
+  .tagline b { color: #fff; font-weight: 600; }
+
+  .chips { margin-top: 44px; display: grid; gap: 14px; }
+  .chip { display: flex; align-items: center; gap: 14px; font-size: 21px; font-weight: 500; color: #e6edff; }
+  .chip i {
+    flex: none; width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(52, 211, 153, .16); border: 1.5px solid rgba(52, 211, 153, .7);
+    display: grid; place-items: center; color: var(--ok); font-style: normal; font-size: 15px; font-weight: 700;
+  }
+
+  /* ventana de navegador con el reporte real */
+  .window {
+    position: absolute; left: 790px; top: 96px; width: 716px; height: 1000px;
+    border-radius: 18px; background: #f8fafc; overflow: hidden;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .12);
+  }
+  .bar { height: 46px; background: #e9eef7; display: flex; align-items: center; gap: 9px; padding: 0 18px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; }
+  .url {
+    margin-left: 14px; flex: 1; height: 32px; border-radius: 16px; background: #fff;
+    font-size: 13.5px; font-weight: 500; color: #5b6b8a; display: flex; align-items: center; padding: 0 16px;
+  }
+  .shot { display: block; width: 100%; }
+
+</style>
+</head>
+<body>
+  <section class="left">
+    <div class="badge"><img src="../../apps/web/public/logo-mark.png" alt=""></div>
+    <h1>CodeBase<br><span class="doctor">Doctor</span> IA</h1>
+    <p class="tagline">Pegá la URL de un repo de GitHub y obtené <b>un puntaje de 0 a 100 en seis dimensiones</b> de ingeniería, cada una con su explicación.</p>
+    <div class="chips">
+      <div class="chip"><i>✓</i>Semgrep + OSV-Scanner reales en sandbox</div>
+      <div class="chip"><i>✓</i>Juez LLM intercambiable: Claude, Groq o Ollama</div>
+      <div class="chip"><i>✓</i>NestJS · React · BullMQ · Prisma · Docker</div>
+      <div class="chip"><i>✓</i>493 tests, E2E con Postgres y Redis reales</div>
+    </div>
+  </section>
+
+  <section class="window">
+    <div class="bar">
+      <span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span>
+      <div class="url">localhost:5173</div>
+    </div>
+    <img class="shot" src="../../docs/img/portfolio/report-es.png" alt="">
+  </section>
+
+</body>
+</html>

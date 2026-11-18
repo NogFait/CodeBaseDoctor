@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>CodeBase Doctor IA — arquitectura</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap');
+
+  :root {
+    --navy-900: #0a1535; --navy-950: #060d24; --box: #101f4a; --box-line: #2a4a94;
+    --blue: #2b8cff; --blue-soft: #7db4ff; --ink: #e6edff; --ink-soft: #b9c6e6; --ok: #34d399;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1600px; height: 900px; overflow: hidden; }
+  body {
+    font-family: 'Poppins', system-ui, sans-serif; color: #fff; position: relative;
+    background-color: var(--navy-950);
+    background-image:
+      linear-gradient(160deg, var(--navy-900), var(--navy-950));
+  }
+  h1 { position: absolute; left: 60px; top: 40px; font-size: 40px; font-weight: 800; letter-spacing: -1px; }
+  h1 span { color: var(--blue); }
+  .sub { position: absolute; left: 60px; top: 94px; font-size: 20px; font-weight: 500; color: var(--ink-soft); }
+
+  .col-label {
+    position: absolute; top: 148px; font-size: 15px; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--blue-soft); font-weight: 600;
+  }
+
+  .box {
+    position: absolute; padding: 18px 22px; border-radius: 16px;
+    background-color: var(--box); border: 1.5px solid var(--box-line);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .35);
+  }
+  .box h2 { font-size: 22px; font-weight: 700; line-height: 1.2; }
+  .box p { margin-top: 8px; font-size: 17px; line-height: 1.4; font-weight: 500; color: var(--ink-soft); }
+  .box code { font-family: 'Poppins', sans-serif; font-weight: 600; color: var(--ink); }
+
+  .infra { border-style: dashed; }
+  .core {
+    position: absolute; padding: 22px 24px; border-radius: 22px;
+    background-color: #0d1b45; border: 2px solid var(--blue);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .45);
+  }
+  .core h2 { font-size: 24px; font-weight: 800; }
+  .core .svc { margin-top: 10px; font-size: 18px; font-weight: 600; color: var(--ok); }
+  .ports { margin-top: 16px; display: grid; gap: 9px; }
+  .port {
+    padding: 8px 14px; border-radius: 10px; font-size: 17px; font-weight: 600; color: var(--ink);
+    background-color: rgba(43, 140, 255, .16); border: 1.5px solid rgba(125, 180, 255, .55);
+  }
+  .note { margin-top: 14px; font-size: 16px; line-height: 1.4; color: var(--ink-soft); font-weight: 500; }
+
+  svg { position: absolute; inset: 0; }
+  .arrow { stroke: var(--blue-soft); stroke-width: 2.4; fill: none; }
+  .tag { position: absolute; font-size: 15px; font-weight: 600; color: var(--blue-soft); }
+</style>
+</head>
+<body>
+  <h1>Arquitectura <span>hexagonal</span></h1>
+  <p class="sub">El dominio nunca toca git, Docker, un SDK de LLM ni SQL: solo habla con puertos.</p>
+
+  <span class="col-label" style="left:60px">Cliente</span>
+  <span class="col-label" style="left:420px">Procesos NestJS</span>
+  <span class="col-label" style="left:850px">Núcleo (puertos)</span>
+  <span class="col-label" style="left:1240px">Adaptadores</span>
+
+  <!-- flechas -->
+  <svg width="1600" height="900" viewBox="0 0 1600 900">
+    <defs>
+      <marker id="h" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#7db4ff"/>
+      </marker>
+    </defs>
+    <!-- SPA <-> API -->
+    <path class="arrow" d="M330 330 L420 330" marker-end="url(#h)"/>
+    <path class="arrow" d="M420 372 L330 372" marker-end="url(#h)"/>
+    <!-- API -> Redis -> Worker -->
+    <path class="arrow" d="M555 458 L555 520" marker-end="url(#h)"/>
+    <path class="arrow" d="M555 640 L555 702" marker-end="url(#h)"/>
+    <!-- Worker -> núcleo -->
+    <path class="arrow" d="M730 770 L850 770" marker-end="url(#h)"/>
+    <!-- núcleo -> adaptadores -->
+    <path class="arrow" d="M1190 235 L1240 235" marker-end="url(#h)"/>
+    <path class="arrow" d="M1190 405 L1240 405" marker-end="url(#h)"/>
+    <path class="arrow" d="M1190 575 L1240 575" marker-end="url(#h)"/>
+    <path class="arrow" d="M1190 745 L1240 745" marker-end="url(#h)"/>
+  </svg>
+  <span class="tag" style="left:348px;top:296px">HTTP</span>
+  <span class="tag" style="left:580px;top:484px">encola</span>
+  <span class="tag" style="left:580px;top:664px">consume</span>
+
+  <!-- cliente -->
+  <div class="box" style="left:60px; top:272px; width:270px; height:160px">
+    <h2>SPA</h2>
+    <p>React 19 · Vite<br>URL → progreso →<br>reporte</p>
+  </div>
+
+  <!-- procesos -->
+  <div class="box" style="left:420px; top:196px; width:310px; height:262px">
+    <h2>apps/api</h2>
+    <p><code>POST /analyses</code><br><code>GET /analyses/:id</code><br>Errores RFC 9457<br>Cuota diaria y rate-limit por IP hasheada</p>
+  </div>
+  <div class="box infra" style="left:420px; top:520px; width:310px; height:120px">
+    <h2>Redis</h2>
+    <p>Cola BullMQ · cuota · rate-limit</p>
+  </div>
+  <div class="box" style="left:420px; top:702px; width:310px; height:134px">
+    <h2>apps/worker</h2>
+    <p>Consumidor BullMQ headless<br>Watchdog de jobs colgados</p>
+  </div>
+
+  <!-- núcleo -->
+  <div class="core" style="left:850px; top:196px; width:340px; height:640px">
+    <h2>libs/analysis</h2>
+    <div class="svc">RepoAnalysisService</div>
+    <p class="note">resolve → cache → cuota → analizar → agregar → persistir o reintegrar</p>
+    <div class="ports">
+      <div class="port">RepoSourcePort</div>
+      <div class="port">CategoryAnalyzer × 6</div>
+      <div class="port">LLMJudgePort</div>
+      <div class="port">ScoreRepositoryPort</div>
+      <div class="port">UsageQuotaPort</div>
+      <div class="port">HeadCallRateLimiterPort</div>
+    </div>
+    <p class="note" style="margin-top:22px">Las dependencias apuntan hacia adentro: el dominio no importa nada de infraestructura.</p>
+  </div>
+
+  <!-- adaptadores -->
+  <div class="box" style="left:1240px; top:182px; width:300px; height:106px">
+    <h2>Sandbox Docker</h2>
+    <p>cbd-fetcher: clona, con red<br>cbd-scanner: analiza, sin red</p>
+  </div>
+  <div class="box" style="left:1240px; top:352px; width:300px; height:106px">
+    <h2>6 analizadores</h2>
+    <p>Semgrep + OSV reales<br>heurísticas · juez LLM</p>
+  </div>
+  <div class="box" style="left:1240px; top:522px; width:300px; height:106px">
+    <h2>Juez LLM</h2>
+    <p>Anthropic · Groq · Ollama<br>stub offline y gratis</p>
+  </div>
+  <div class="box infra" style="left:1240px; top:692px; width:300px; height:106px">
+    <h2>PostgreSQL 16</h2>
+    <p>Cache de scans, jobs y cuota (Prisma)</p>
+  </div>
+</body>
+</html>
