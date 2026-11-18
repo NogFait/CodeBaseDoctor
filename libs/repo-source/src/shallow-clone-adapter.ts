@@ -28,6 +28,7 @@ import {
 } from "./git-commands";
 import { buildDuArgs, parseDuOutputKb } from "./disk-usage";
 import { demuxDockerLog } from "./docker-log";
+import { extractScannerWarnings } from "./scanner-warnings";
 
 /** The volume's mount point inside every container. */
 const MOUNT_DIR = "/work";
@@ -288,6 +289,12 @@ export class ShallowCloneAdapter implements RepoSourcePort {
       }
       if (indexResult.exitCode !== 0) {
         throw new Error(`cbd-scanner indexing failed: ${indexResult.stderr}`);
+      }
+      // A degraded scan (semgrep/osv-scanner failed) still exits 0 with empty
+      // findings; surface why instead of letting it pass as "clean".
+      for (const warning of extractScannerWarnings(indexResult.stderr)) {
+        // eslint-disable-next-line no-console
+        console.warn(`[cbd-repo-source] scanner degraded for ${ref.url}: ${warning}`);
       }
 
       const context = this.buildRepoContext(ref.url, sha, volumeName, indexResult.stdout);

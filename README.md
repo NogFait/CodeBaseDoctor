@@ -180,7 +180,7 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 | **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
 | **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
 | **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
-| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 485 tests / 69 archivos |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 489 tests / 70 archivos |
 | **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
 
 ---
@@ -274,7 +274,7 @@ Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_K
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 69 archivos de test / 485 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 70 archivos de test / 489 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```
