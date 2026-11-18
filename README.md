@@ -77,21 +77,34 @@ curl -s localhost:3000/analyses/<jobId>
 
 ## Capturas
 
-La SPA tiene cuatro estados: ingreso de URL → progreso en vivo por categoría → reporte → re-scan.
+La SPA tiene cuatro estados: ingreso de URL → progreso en vivo por categoría → reporte → re-scan. Son capturas de la aplicación real (se regeneran con `scripts/portfolio/`, ver [`docs/img/portfolio`](docs/img/portfolio/README.md)).
 
 | | |
 | --- | --- |
-| ![Ingreso de URL](docs/img/phase7-entry.png) | **Ingreso de URL** — pegás una URL pública de GitHub. |
-| ![Progreso en vivo por categoría](docs/img/phase7-progress-categories.png) | **Progreso en vivo por categoría** — el cliente hace polling a `GET /analyses/:id`; cada una de las seis categorías pasa por `pending → running → scored`. |
-| ![Reporte completo](docs/img/phase7-report.png) | **Reporte completo** — seis tarjetas, puntaje compuesto, pills de confianza `measured` / `estimated` / `judged`, cuota diaria restante, y "Re-scan" / "Analyze another repo". |
-| ![Reporte parcial](docs/img/phase7-partial.png) | **Reporte parcial** — una categoría no se pudo puntuar (≥ 4 de 6 igual lo lograron). La tarjeta muestra "Could not be scored" con un botón de Retry; el compuesto se calcula con las categorías que sí puntuaron. |
-| ![Scan fallido — cuota reintegrada](docs/img/phase7-report-failed.png) | **Scan fallido** — menos de 4 categorías puntuaron, o un timeout de clone/scan. El job queda `failed` y la unidad de cuota diaria se reintegra. |
+| ![Ingreso de URL](docs/img/portfolio/entry-es.png) | **Ingreso de URL** — pegás una URL pública de GitHub. |
+| ![Progreso en vivo por categoría](docs/img/portfolio/progress-es.png) | **Progreso en vivo por categoría** — el cliente hace polling a `GET /analyses/:id`; cada una de las seis categorías pasa por `pendiente → en curso → puntuada`. |
+| ![Reporte parcial](docs/img/portfolio/report-partial-es.png) | **Reporte parcial** — una categoría no se pudo puntuar (≥ 4 de 6 igual lo lograron). La tarjeta muestra "No pudo evaluarse" con un botón "Reintentar"; el compuesto se calcula con las que sí puntuaron. *Capturado con el juez `stub` forzado a fallar en Architecture, por eso Documentation dice `[stub verdict]`.* |
+| ![Scan fallido — cuota reembolsada](docs/img/portfolio/report-failed-es.png) | **Scan fallido** — menos de 4 categorías puntuaron, o un timeout de clone/scan. El job queda `failed` y la unidad de cuota diaria se reembolsa. |
+
+### Reporte completo, en español e inglés
+
+<p align="center">
+  <img src="docs/img/portfolio/report-es.png" alt="Reporte completo en español" width="48%">
+  &nbsp;
+  <img src="docs/img/portfolio/report-en.png" alt="Reporte completo en inglés" width="48%">
+</p>
+
+Seis tarjetas con puntaje compuesto, etiquetas de confianza (`measured` / `estimated` / `judged`), cuota diaria restante y "Volver a analizar" / "Analizar otro repo". Es el análisis de [`lukeed/clsx`](https://github.com/lukeed/clsx) con un juez LLM real (`openai/gpt-oss-120b`, tier gratuito de Groq): los rationales de Architecture y Documentation los escribe el modelo y por ahora salen en inglés (ver roadmap).
 
 ---
 
 ## Arquitectura
 
 Monorepo con pnpm workspaces, hexagonal (ports-and-adapters). Dos procesos NestJS comparten una librería de dominio; una SPA de React habla únicamente con el proceso HTTP.
+
+![Arquitectura hexagonal: SPA, procesos NestJS, núcleo con puertos y adaptadores](docs/img/portfolio/architecture.png)
+
+El mismo diagrama con más detalle, en Mermaid:
 
 ```mermaid
 flowchart TD
@@ -180,7 +193,7 @@ La cache key es `(repoUrl, commitSha, engineVersion)`, donde `engineVersion` es 
 | **Datos** | PostgreSQL 16 + Prisma 6 · Redis 7 (cola, cuota, rate-limit) |
 | **Análisis** | Semgrep + OSV-Scanner (offline, en contenedor aislado) · juez LLM (Claude, o stub offline gratis) |
 | **Ingesta** | Docker + dockerode — shallow-clone en un sandbox efímero sin red, nunca ejecuta código del repo |
-| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 489 tests / 70 archivos |
+| **Testing** | Vitest · Testcontainers (Postgres/Redis reales) · Strict TDD — 493 tests / 71 archivos |
 | **Tooling** | pnpm 10 workspaces · graphify (grafo de conocimiento del repo) |
 
 ---
@@ -203,6 +216,9 @@ libs/
   persistence/  Schema Prisma 6 + Postgres; cache de RepoScan, ciclo de vida de AnalysisJob, progreso por
                 categoría, DailyFreeTierAdapter (cuota) y RedisHeadCallRateLimiterAdapter sobre Redis
   jobs/         Productor BullMQ (AnalysisQueueProducer) + consumidor (AnalysisProcessor)
+scripts/
+  portfolio/    Generan las capturas reales (Playwright) y las imágenes de portafolio (plantillas HTML → PNG)
+docs/img/       Logo, hero, demo.gif y portfolio/ (portada, social preview, arquitectura, capturas)
 ```
 
 ---
@@ -274,7 +290,7 @@ Para el juez de Anthropic (pago), poné `LLM_JUDGE=anthropic` y `ANTHROPIC_API_K
 ## Tests
 
 ```bash
-pnpm test          # Vitest (vitest run) — 70 archivos de test / 489 tests entre unit, integración y E2E
+pnpm test          # Vitest (vitest run) — 71 archivos de test / 493 tests entre unit, integración y E2E
 pnpm test:watch    # Vitest en modo watch
 pnpm typecheck     # tsc --noEmit para el tsconfig raíz y para apps/web
 ```
@@ -354,9 +370,24 @@ Base URL en desarrollo local: `http://localhost:3000`.
 
 ---
 
+## Decisiones y aprendizajes
+
+Probar el sistema contra repos reales —no solo contra fixtures— destapó bugs que cientos de tests no veían. Cada uno se arregló con un test que lo reproduce primero:
+
+- **Detección de README sensible a mayúsculas.** El analizador de Documentation buscaba nombres exactos (`README.md`), así que un `readme.md` figuraba como "sin README" y el juez puntuaba 15 un proyecto documentado (`p-limit`: 15 → 88).
+- **Un falso positivo crítico en Semgrep.** La regla `dangerous-eval` marcaba como crítico cualquier `regex.exec(...)`, que es `RegExp#exec` y no ejecución de código; `commander.js` sacaba Security 60 (ahora 100). El test de integración usa Semgrep real y fija exactamente qué líneas se marcan.
+- **Tests que no se reconocían.** `test.js` suelto, `*.test-d.ts` o carpetas `test/` daban "0 tests" (`p-limit`: 30 → 100). La escala ahora mide tests contra archivos *fuente*, no contra todos los archivos, y satura en 0.5 tests por archivo.
+- **Un escaneo ~4× más lento de lo necesario.** Midiendo por etapas dentro del contenedor, Semgrep tardaba 46 s contra 2 s: esperaba ~44 s una consulta de versión por internet en un contenedor sin red. Con `--disable-version-check` un escaneo bajó de ~58 s a ~15 s. (La primera hipótesis, la copia de la base de OSV, se descartó midiendo.)
+- **Fallos silenciosos.** Si Semgrep u OSV-Scanner fallaban, el indexer seguía con "0 hallazgos" y salía con código 0: un repo vulnerable podía verse limpio. Ahora las advertencias se registran.
+- **Tests atados al reloj.** El del limitador usaba ventanas de 50 ms con el reloj real y fallaba si dos llamadas cruzaban el borde; ahora fija `Date.now`.
+
+Una regla que atraviesa todo: cualquier corrección que cambia puntajes **sube la versión del analizador**, y como la versión forma parte de la clave de cache, los scans viejos se invalidan solos.
+
+---
+
 ## Estado / roadmap
 
-**MVP completo** — Fases 1–8: dominio y ports, los seis adaptadores de analizador, ingesta con sandbox de Docker, persistencia Prisma/Redis, la API HTTP con errores RFC 9457, el pipeline del worker con el watchdog de jobs colgados, la SPA de React, y la suite E2E sobre Postgres/Redis/Semgrep/OSV reales. Más: selector de idioma **ES / EN** (i18n de la UI + rationales de los analizadores deterministas), branding y guía de desarrollo local con juez LLM stub sin costo.
+**MVP completo** — Fases 1–8: dominio y ports, los seis adaptadores de analizador, ingesta con sandbox de Docker, persistencia Prisma/Redis, la API HTTP con errores RFC 9457, el pipeline del worker con el watchdog de jobs colgados, la SPA de React, y la suite E2E sobre Postgres/Redis/Semgrep/OSV reales. Más: selector de idioma **ES / EN** (i18n de la UI + rationales de los analizadores deterministas), branding y guía de desarrollo local con juez LLM stub sin costo. Además: juez LLM gratuito (OpenAI-compatible), CI en GitHub Actions, licencia MIT, demo grabada y material de portafolio reproducible.
 
 **Roadmap** (corto y honesto):
 
@@ -364,6 +395,9 @@ Base URL en desarrollo local: `http://localhost:3000`.
 - Validación de URL del lado del cliente antes de enviar (hoy el primer feedback ante una URL inválida es el round-trip del `400`).
 - Constantes de rate-limit / cuota ajustadas — los valores de límite y ventana son una política fija horneada en los adaptadores.
 - Un escenario E2E dedicado para scan-timeout (el camino del `504` tiene cobertura unit pero todavía no end-to-end).
+- Truncar con "ver más" los rationales largos del juez: hoy un párrafo extenso estira la tarjeta y deja huecos en el reporte.
+- Idioma inicial según `navigator.language` para quien entra por primera vez (hoy arranca en español).
+- Un E2E de seguridad falló una vez en el CI (OSV-Scanner no devolvió hallazgos) y no se reproduce en local; ahora se registran las advertencias del scanner para diagnosticarlo si vuelve a pasar.
 
 ---
 

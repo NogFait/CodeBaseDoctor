@@ -179,7 +179,9 @@ drives the cached system Chromium at
 (sidesteps browser-revision checks). Scripts live in the session scratchpad
 (`shoot.mjs`, `one.mjs`, `failed2.mjs`).
 
-Captured (`phase7-<state>.png`):
+Captured the first time by hand-written scratch scripts (`phase7-<state>.png`, since replaced). They are now
+reproducible with `scripts/portfolio/capture-screenshots.mjs` and `capture-states.mjs` (output in
+`docs/img/portfolio/`; see its README). The states, and how each one is forced:
 
 | State | How |
 | --- | --- |
