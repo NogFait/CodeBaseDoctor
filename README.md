@@ -225,52 +225,159 @@ docs/img/       Logo, hero, demo.gif y portfolio/ (portada, social preview, arqu
 
 ## Puesta en marcha (desarrollo local)
 
-El camino por defecto usa un **stub de LLM gratis y offline** (`LLM_JUDGE=stub`): sin API key de Anthropic, sin llamadas de red, sin costo. `DEV-HARNESS.md` tiene el recorrido completo, el porqué de cada cosa, y los detalles que muerden — el resumen de abajo es la sección 4 de ese archivo.
+Esta guía te lleva de un repo recién clonado a tener la aplicación analizando repositorios en tu máquina. Tarda entre 15 y 20 minutos la primera vez (casi todo es construir una imagen de Docker) y **no necesitás ninguna cuenta ni API key**: por defecto usa un juez LLM "stub" gratis y offline.
 
-### Prerrequisitos
+> Hay un recorrido más detallado, con el porqué de cada decisión, en [`DEV-HARNESS.md`](DEV-HARNESS.md).
 
-- **Node ≥ 20.6** (probado en v24) — hace falta para `--env-file-if-exists`.
-- **pnpm 10** (probado en 10.33).
-- **Docker** + `docker compose`, con un socket de Docker funcionando.
-- Las dos imágenes del sandbox construidas y presentes localmente:
-  ```bash
-  # el contexto es apps/worker/docker (los COPY del Dockerfile son relativos a esa carpeta)
-  docker build -f apps/worker/docker/cbd-fetcher.Dockerfile -t cbd-fetcher:local apps/worker/docker
-  docker build -f apps/worker/docker/cbd-scanner.Dockerfile -t cbd-scanner:local apps/worker/docker
-  ```
+### 1. Antes de empezar
 
-### Pasos
+| Herramienta | Versión | Cómo verificarla |
+| --- | --- | --- |
+| **Node.js** | 20.6 o superior (el CI usa 22) | `node -v` |
+| **pnpm** | 10 | `pnpm -v` — si no lo tenés: `npm install -g pnpm@10` |
+| **Docker** con Compose v2 | reciente | `docker compose version` y `docker ps` |
+
+Además:
+
+- Tu usuario tiene que poder usar Docker **sin `sudo`** (`docker ps` no debe dar "permission denied"; ver la tabla de problemas más abajo).
+- Estos puertos tienen que estar **libres**: `3000` (API), `5173` (web), `5432` (Postgres) y `6379` (Redis).
+- Unos 3 GB de disco libres y conexión a internet (se descargan imágenes y dependencias).
+- Probado en **Linux** (Ubuntu 24.04, y el CI corre en Ubuntu). En macOS o Windows con Docker Desktop debería funcionar pero no lo probé; en Windows usá WSL2.
+
+### 2. Qué vas a levantar
+
+| Pieza | Qué es | Dónde corre |
+| --- | --- | --- |
+| Postgres y Redis | base de datos, cola de jobs, cuota y rate-limit | Docker (`docker compose`) |
+| `cbd-fetcher` y `cbd-scanner` | los contenedores sandbox: uno clona el repo (con red), el otro lo analiza (**sin red**) | imágenes de Docker que construís vos una vez |
+| API | recibe las peticiones HTTP | terminal 1 |
+| Worker | toma los jobs de la cola y hace el análisis | terminal 2 |
+| Web | la interfaz (React) | terminal 3 |
+
+### 3. Paso a paso
+
+Todos los comandos se corren **desde la raíz del repositorio**.
+
+**Paso 1 — Instalar las dependencias**
 
 ```bash
-# 1. Instalar
 pnpm install
-
-# 2. Entorno — copiá el template y completá los placeholders <…>.
-#    Los defaults están cableados para la infra de docker-compose de abajo; LLM_JUDGE=stub no necesita nada más.
-cp .env.example .env
-
-# 3. Infra — Postgres + Redis
-docker compose up -d
-#    docker-compose.override.yml republica Postgres en el puerto host 5433 si el 5432 ya está tomado;
-#    mantené DATABASE_URL en sync con el puerto que te toque.
-
-# 4. Base de datos
-pnpm --filter @cbd/persistence prisma:generate
-pnpm --filter @cbd/persistence prisma:migrate
-
-# 5. Los tres procesos — una shell cada uno; el entorno sale de .env
-pnpm --filter @cbd/api    start:dev     # HTTP NestJS en :3000
-pnpm --filter @cbd/worker start:dev     # consumidor BullMQ headless
-pnpm --filter @cbd/web    dev           # dev server de Vite (:5173, o el siguiente puerto libre)
-
-# 6. Smoke test
-curl -s -XPOST localhost:3000/analyses -H 'content-type: application/json' \
-  -d '{"repoUrl":"https://github.com/tj/commander.js","forceRescan":false}'
 ```
 
-Mirá [`DEV-HARNESS.md`](DEV-HARNESS.md) para los detalles que muerden: por qué `start:dev` tiene que apuntar tsx al `tsconfig.json` **raíz**, cómo matar árboles de procesos huérfanos, y los arreglos de conflicto de puertos.
+Deberías ver, al final, algo como `Done in 20s`. Antes aparece un recuadro amarillo, `Ignored build scripts: @prisma/client, esbuild…`: **es normal** (pnpm 10 no ejecuta por defecto los scripts de instalación de algunos paquetes) y no hace falta aprobar nada; lo comprobé de punta a punta.
 
-### Juez LLM real y gratuito
+**Paso 2 — Construir las dos imágenes del sandbox**
+
+```bash
+pnpm docker:build
+```
+
+Es el paso más lento: la imagen del scanner incluye Semgrep y una base de datos de vulnerabilidades de OSV (unos 250 MB), así que la primera vez tarda **varios minutos**. Las siguientes veces usa la caché y tarda segundos. Para comprobar que quedaron:
+
+```bash
+docker image ls --filter "reference=cbd-*"
+```
+
+Tienen que aparecer `cbd-fetcher` y `cbd-scanner`, ambas con la etiqueta `local`.
+
+**Paso 3 — Crear el archivo `.env`**
+
+Copiá y pegá este bloque tal cual. Crea el `.env` con valores que ya coinciden con el `docker-compose.yml` y genera un secreto aleatorio:
+
+```bash
+cat > .env <<EOF
+DATABASE_URL=postgresql://cbd:cbd@localhost:5432/codebase_doctor
+REDIS_HOST=localhost
+REDIS_PORT=6379
+PORT=3000
+LLM_JUDGE=stub
+ACTOR_SALT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+EOF
+```
+
+| Variable | Para qué sirve |
+| --- | --- |
+| `DATABASE_URL` | cómo conectarse a Postgres (usuario y contraseña `cbd`, definidos en `docker-compose.yml`) |
+| `REDIS_HOST` / `REDIS_PORT` | dónde está Redis |
+| `PORT` | puerto de la API |
+| `LLM_JUDGE=stub` | usa el juez falso y gratuito. Para uno real, ver [Juez LLM real y gratuito](#6-opcional-un-juez-llm-real-y-gratuito) |
+| `ACTOR_SALT_SECRET` | secreto con el que se identifica a cada usuario de forma anónima (por IP hasheada) |
+
+La lista completa de variables está en [Configuración](#configuración).
+
+**Paso 4 — Levantar Postgres y Redis**
+
+```bash
+docker compose up -d --wait
+```
+
+Deberías ver `Healthy` junto a `cbd-postgres` y `cbd-redis`. Si el puerto `5432` o el `6379` ya están ocupados, mirá la tabla de problemas.
+
+**Paso 5 — Preparar la base de datos**
+
+```bash
+pnpm db:generate
+pnpm db:migrate
+```
+
+El segundo debería terminar diciendo que las migraciones se aplicaron (`All migrations have been successfully applied`).
+
+**Paso 6 — Levantar los tres procesos**
+
+Abrí **tres terminales**, todas en la raíz del repo, y corré un comando en cada una:
+
+```bash
+pnpm dev:api       # terminal 1 → API en http://localhost:3000
+pnpm dev:worker    # terminal 2 → consumidor de la cola
+pnpm dev:web       # terminal 3 → interfaz en http://localhost:5173
+```
+
+Qué deberías ver:
+
+- **API:** `Nest application successfully started`.
+- **Worker:** varias líneas `dependencies initialized` y un aviso `[cbd-llm] LLM_JUDGE=stub` (es normal: te recuerda que los puntajes del juez son falsos).
+- **Web:** `Local: http://localhost:5173/`. Si ese puerto está ocupado, Vite elige el siguiente libre (5174, 5175…) y te lo dice: usá **la URL que te muestre**, no necesariamente la 5173.
+
+**Paso 7 — Probarlo**
+
+Abrí la URL que mostró la web en el navegador, pegá un repo de GitHub **público** y chico (por ejemplo `https://github.com/lukeed/clsx`) y tocá **Analizar repo**. Vas a ver el progreso por categoría y, en unos 20 segundos para un repo chico (hasta un minuto si es más grande), el reporte con las seis puntuaciones.
+
+Con el juez `stub`, las tarjetas de **Arquitectura** y **Documentación** muestran la etiqueta `[stub verdict]`: son valores falsos y estables a propósito. El resto (Seguridad, Testing, Mantenibilidad, Rendimiento) es análisis real. Para que esas dos también las juzgue un LLM de verdad, mirá la sección siguiente.
+
+Si preferís probar sin la interfaz:
+
+```bash
+curl -s -XPOST localhost:3000/analyses -H 'content-type: application/json' \
+  -d '{"repoUrl":"https://github.com/lukeed/clsx","forceRescan":false}'
+```
+
+Devuelve un `jobId` (código `202`); consultalo con `curl -s localhost:3000/analyses/<jobId>` hasta que el estado sea `completed`.
+
+### 4. Si algo falla
+
+| Síntoma | Causa probable | Qué hacer |
+| --- | --- | --- |
+| `port is already allocated` o `address already in use` en el **5432** | Ya tenés un Postgres en tu máquina | `cp docker-compose.override.example.yml docker-compose.override.yml`, cambiá `5432` por `5433` en `DATABASE_URL` dentro de `.env`, y repetí `docker compose up -d --wait` |
+| Lo mismo en el **6379** | Ya tenés un Redis corriendo | Detené ese Redis (por ejemplo `sudo systemctl stop redis`) y repetí el paso 4 |
+| `permission denied while trying to connect to the Docker daemon socket` | Tu usuario no puede usar Docker | `sudo usermod -aG docker $USER`, cerrá la sesión y volvé a entrar |
+| `Environment variable not found: DATABASE_URL` (Prisma) | No existe el `.env`, o no está en la **raíz** del repo | Repetí el paso 3 desde la raíz |
+| `Can't reach database server` | Postgres no está levantado, o el puerto del `.env` no coincide | `docker compose ps` tiene que mostrar `healthy`; revisá el puerto de `DATABASE_URL` |
+| `No such image: cbd-scanner:local` (o `cbd-fetcher:local`) | Falta construir las imágenes | Paso 2 |
+| El análisis se queda en "pendiente" y no avanza | El worker no está corriendo, o quedaron procesos viejos | Mirá que la terminal 2 siga viva; si hay procesos colgados: `pkill -f 'src/main.ts'` y volvé a levantar los tres |
+| "Cuota diaria de análisis superada" | El plan gratuito permite 5 análisis por día por usuario | En desarrollo: `docker exec cbd-postgres psql -U cbd -d codebase_doctor -c "update quota_reservation set state='refunded' where usage_date = current_date"` |
+| Error con `--env-file-if-exists` al arrancar la API | Node anterior a 20.6 | Actualizá Node |
+
+### 5. Apagar y empezar de cero
+
+```bash
+# Ctrl+C en las tres terminales, y después:
+docker compose down        # apaga Postgres y Redis (conserva los datos)
+docker compose down -v     # además BORRA la base de datos: empezás de cero
+```
+
+Para correr los tests: `pnpm test` (necesita Docker; ver [Tests](#tests)).
+
+### 6. Opcional: un juez LLM real y gratuito
 
 Para juzgar con un LLM real **sin pagar**, usá el adaptador OpenAI-compatible (`LLM_JUDGE=openai`). Cualquiera de estos proveedores tiene tier gratis o corre local:
 
